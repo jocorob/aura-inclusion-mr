@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#060910" />
+    <meta
+      name="description"
+      content="AURA · Simulador interactivo de Realidad Mixta y WebXR del arnés de asistencia visual con LiDAR ToF, edge AI y voz local."
+    />
+    <title>AURA · Simulador de Realidad Mixta</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1220'/%3E%3Ccircle cx='32' cy='32' r='9' fill='none' stroke='%23e83f50' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='19' fill='none' stroke='%23e83f50' stroke-width='1.4' opacity='.6'/%3E%3Ccircle cx='32' cy='32' r='27' fill='none' stroke='%233ee0d0' stroke-width='1' opacity='.45'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body class="mode-sim is-loading">
+    <canvas id="scene-canvas" aria-label="Escena 3D interactiva del dispositivo AURA"></canvas>
+    <div class="screen-fx" aria-hidden="true">
+      <div class="vignette"></div>
+      <div class="scanlines"></div>
+      <div id="pov-frame" class="pov-frame"></div>
+    </div>
+
+    <!-- ===================== LOADER ===================== -->
+    <div id="loader" role="status" aria-live="polite">
+      <div class="loader-inner">
+        <div class="loader-mark">AURA<span>+</span></div>
+        <div class="loader-sub">SISTEMA DE ASISTENCIA VISUAL · MR</div>
+        <div class="loader-bar"><i></i></div>
+        <div class="loader-step" id="loader-step">Inicializando fusión sensorial…</div>
+      </div>
+    </div>
+
+    <!-- ===================== TOP BAR ===================== -->
+    <header id="topbar">
+      <div class="brand">
+        <div class="brand-mark">AURA<span>+</span></div>
+        <div class="brand-sub">ASISTENCIA VISUAL · REALIDAD MIXTA</div>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Modos del simulador">
+        <button class="tab" data-mode="model" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6 21 7.5v9L12 21.4 3 16.5v-9L12 2.6Z"/><path d="M3.4 7.6 12 12.3l8.6-4.7M12 12.3v8.8"/></svg>
+          Modelo 3D
+        </button>
+        <button class="tab active" data-mode="sim" role="tab" aria-selected="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18.5V6.2c0-.8.7-1.4 1.5-1.2l14 3.4c.9.2 1.5 1 1.5 1.9v7.4c0 .9-.6 1.7-1.5 1.9l-14 2.7c-.8.2-1.5-.4-1.5-1.2Z"/><path d="M8 12h8M12 8v8"/></svg>
+          Simulación
+        </button>
+      </nav>
+
+      <div class="top-actions">
+        <div class="pill live" title="Procesamiento local activo"><i></i> Edge AI</div>
+        <div class="pill privacy-pill" title="Ningún dato abandona el arnés"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.4"/><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/></svg> <b>0</b> B nube</div>
+        <button id="xr-vr" class="xr-btn" hidden title="Entrar en realidad virtual">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.2 8.4h17.6v5.4c0 1.3-1 2.3-2.3 2.3h-2.3l-2-2.4h-4.4l-2 2.4H5.5c-1.3 0-2.3-1-2.3-2.3V8.4Z"/><path d="M6.5 11.6h2.2M17.6 11.6h-2.2"/></svg>
+          VR
+        </button>
+        <button id="xr-ar" class="xr-btn" hidden title="Ver el arnés en tu espacio con realidad aumentada">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 20 7.6v8.8L12 20.8 4 16.4V7.6l8-4.4Z"/><path d="M4.4 7.8 12 12l7.6-4.2M12 12v8.4"/></svg>
+          AR
+        </button>
+        <button id="mobile-data" class="icon-btn mobile-only" title="Telemetría" aria-label="Mostrar telemetría">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>
+        </button>
+        <button id="mobile-voice" class="icon-btn mobile-only" title="Voz y alertas" aria-label="Mostrar voz y alertas">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2l2-5 3 12 3-9 2 5h6"/><circle cx="19" cy="12" r="2"/></svg>
+        </button>
+        <button id="toggle-panels" class="icon-btn" title="Mostrar u ocultar paneles (M)" aria-label="Mostrar u ocultar paneles">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="7" height="16" rx="1.6"/><rect x="14" y="4" width="7" height="16" rx="1.6"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ===================== LEFT / TELEMETRY ===================== -->
+    <aside class="stack left" id="stack-left">
+      <section class="panel" aria-label="Telemetría del sistema">
+        <div class="panel-head">
+          <span class="live-dot"></span>
+          <h2>Telemetría</h2>
+          <span class="tag">RPI 5</span>
+          <span class="session" id="session-time">00:00</span>
+        </div>
+
+        <div class="battery">
+          <div class="battery-dial">
+            <svg viewBox="0 0 100 100" aria-hidden="true">
+              <circle class="track" cx="50" cy="50" r="42"></circle>
+              <circle class="fill" id="battery-ring" cx="50" cy="50" r="42"></circle>
+            </svg>
+            <div class="battery-value"><b id="battery-pct">87</b><span>%</span></div>
+            <div class="battery-caption">BATERÍA</div>
+          </div>
+          <div class="battery-meta">
+            <div class="kv"><span>Autonomía</span><b id="battery-eta">18 h 42 min</b></div>
+            <div class="kv"><span>Paquete</span><b id="battery-pack">2S · 7.9 V</b></div>
+            <div class="kv"><span>Consumo</span><b id="battery-draw">1.24 A</b></div>
+            <div class="kv"><span>Carga</span><b id="battery-status" class="ok">Nominal</b></div>
+          </div>
+        </div>
+
+        <div class="metric-grid">
+          <div class="metric">
+            <span class="m-label">Latencia local</span>
+            <div class="m-value"><b id="latency">42</b><span>ms</span></div>
+            <canvas id="latency-spark" width="120" height="26"></canvas>
+          </div>
+          <div class="metric">
+            <span class="m-label">CPU · 4 núcleos</span>
+            <div class="m-value"><b id="cpu">38</b><span>%</span></div>
+            <div class="cores" id="cores" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          </div>
+          <div class="metric">
+            <span class="m-label">Temperatura</span>
+            <div class="m-value"><b id="temp">52</b><span>°C</span></div>
+            <div class="mini-bar"><i id="temp-bar" style="width: 52%"></i></div>
+          </div>
+          <div class="metric">
+            <span class="m-label">Render</span>
+            <div class="m-value"><b id="fps">60</b><span>fps</span></div>
+            <div class="mini-bar neutral"><i id="fps-bar" style="width: 100%"></i></div>
+          </div>
+        </div>
+
+        <div class="section-label"><span>Sensores</span><em id="lidar-hz-badge">10 Hz</em></div>
+        <ul class="sensor-list">
+          <li>
+            <span class="sensor-ico">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+            </span>
+            <div><b>LiDAR ToF · C1</b><span>SLAMTEC · 5 000 pts/s · 12 m</span></div>
+            <em class="ok" id="lidar-state">activo</em>
+          </li>
+          <li>
+            <span class="sensor-ico">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="3.4"/></svg>
+            </span>
+            <div><b>Cámara frontal</b><span>1080p · 30 fps · HDR 120°</span></div>
+            <em class="ok" id="cam-state">activo</em>
+          </li>
+          <li>
+            <span class="sensor-ico">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M4.6 8h14.8M4.6 16h14.8"/></svg>
+            </span>
+            <div><b>IMU 9 ejes</b><span>100 Hz · fusión con SLAM</span></div>
+            <em class="ok">activo</em>
+          </li>
+        </ul>
+
+        <div class="privacy">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8 20 6v6.2c0 4.3-3.2 7.4-8 9-4.8-1.6-8-4.7-8-9V6l8-3.2Z"/><path d="m8.6 11.8 2.3 2.3 4.5-4.6"/></svg>
+          <div>
+            <b>Privacidad por diseño</b>
+            <span>Audio, video y escaneo se procesan dentro del arnés. <strong>Ningún byte</strong> abandona el dispositivo.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel radar-panel" aria-label="Radar LiDAR en vivo">
+        <div class="panel-head">
+          <span class="live-dot cyan"></span>
+          <h2>Radar LiDAR</h2>
+          <span class="tag" id="radar-mode">360°</span>
+        </div>
+        <div class="radar-wrap">
+          <canvas id="radar" width="520" height="520"></canvas>
+          <div class="radar-legend">
+            <span><i class="g"></i>&gt; 3 m</span><span><i class="a"></i>1–3 m</span><span><i class="r"></i>&lt; 1 m</span>
+          </div>
+          <div class="radar-dist"><b id="radar-min">—</b><span>m al obstáculo más próximo</span></div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ===================== RIGHT / VOICE ===================== -->
+    <aside class="stack right" id="stack-right">
+      <section class="panel voice-panel" aria-label="Interfaz de voz local">
+        <div class="panel-head">
+          <span class="live-dot"></span>
+          <h2>Voz local</h2>
+          <span class="tag">PIPER TTS</span>
+        </div>
+
+        <div class="voice-stage">
+          <canvas id="waveform" width="560" height="88"></canvas>
+          <div class="utterance" id="utterance">«Sistema AURA en línea. Escaneando el entorno.»</div>
+          <div class="voice-meta">
+            <span id="voice-engine" class="mono">es_ES · davefx · 0 ms nube</span>
+            <button id="voice-toggle" class="chip on" aria-pressed="true">Voz activa</button>
+          </div>
+        </div>
+
+        <div class="quick-asks" role="group" aria-label="Consultas de voz simuladas">
+          <button data-ask="front"><span>◉</span> ¿Qué hay delante?</button>
+          <button data-ask="exit"><span>➜</span> ¿Por dónde salgo?</button>
+          <button data-ask="describe"><span>◍</span> Describe el entorno</button>
+        </div>
+
+        <div class="section-label"><span>Registro de alertas</span><em>local</em></div>
+        <ul class="log" id="voice-log" aria-live="polite">
+          <li class="empty">Esperando eventos del sensor…</li>
+        </ul>
+      </section>
+
+      <section class="panel pipeline-panel" aria-label="Pipeline de inteligencia artificial en el borde">
+        <div class="panel-head">
+          <span class="live-dot"></span>
+          <h2>Pipeline Edge AI</h2>
+          <span class="tag" id="pipeline-tag">4 ms</span>
+        </div>
+        <ol class="pipeline" id="pipeline">
+          <li data-node="mic">
+            <span class="node-ico">◍</span>
+            <div><b>Whisper · tiny</b><span>Reconocimiento de voz</span></div>
+            <em>local</em>
+          </li>
+          <li data-node="fusion">
+            <span class="node-ico">✳</span>
+            <div><b>Fusión sensorial</b><span>LiDAR + cámara + IMU</span></div>
+            <em>40 Hz</em>
+          </li>
+          <li data-node="slam">
+            <span class="node-ico">▦</span>
+            <div><b>SLAM &amp; riesgos</b><span>Mapa espacial · 1.4 m</span></div>
+            <em>12 ms</em>
+          </li>
+          <li data-node="tts">
+            <span class="node-ico">◈</span>
+            <div><b>Piper · TTS</b><span>Voz natural en español</span></div>
+            <em>0 ms</em>
+          </li>
+        </ol>
+        <div class="net-row">
+          <span class="net-ok"><i></i> Sin conexión requerida</span>
+          <span>Nube <b>0 KB</b></span>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ===================== MODEL MODE INFO ===================== -->
+    <button class="hotspot" data-part="harness" hidden><i></i><span>Arnés de pecho</span></button>
+    <button class="hotspot" data-part="box" hidden><i></i><span>Caja AURA · Pi 5</span></button>
+    <button class="hotspot" data-part="camera" hidden><i></i><span>Cámara frontal</span></button>
+    <button class="hotspot" data-part="lidar" hidden><i></i><span>LiDAR ToF C1</span></button>
+
+    <div id="spec-card" class="spec-card" hidden>
+      <button class="spec-close" aria-label="Cerrar ficha">×</button>
+      <div class="spec-eyebrow" id="spec-eyebrow">COMPONENTE 01</div>
+      <h3 id="spec-title">Arnés de pecho</h3>
+      <p id="spec-body">Sinopsis del componente.</p>
+      <dl id="spec-list"></dl>
+    </div>
+
+    <!-- ===================== SCENE OVERLAYS ===================== -->
+    <div id="vision-layer" class="vision-layer" aria-hidden="true"></div>
+    <div class="zone-label" id="zone-label"><span>ZONA</span><b>Pasillo A</b></div>
+    <div class="scene-tip" id="scene-tip">
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> desplazarse
+      <span class="sep">·</span> arrastra para mirar
+      <span class="sep">·</span> <kbd>Espacio</kbd> cambia de cámara
+    </div>
+
+    <!-- ===================== DOCK ===================== -->
+    <footer id="dock">
+      <div class="dock-left">
+        <div class="dpad" role="group" aria-label="Controles de desplazamiento">
+          <button data-key="forward" class="up" aria-label="Avanzar">▲</button>
+          <button data-key="left" class="left" aria-label="Izquierda">◀</button>
+          <button data-key="back" class="down" aria-label="Retroceder">▼</button>
+          <button data-key="right" class="right" aria-label="Derecha">▶</button>
+          <span class="dpad-core"></span>
+        </div>
+      </div>
+
+      <div class="dock-center">
+        <div class="seg" id="camera-seg" role="group" aria-label="Cámara de simulación">
+          <button data-cam="third" class="active">3ª persona</button>
+          <button data-cam="pov">POV AURA</button>
+        </div>
+        <div class="seg" id="env-seg" role="group" aria-label="Entorno de simulación">
+          <button data-env="corridor" class="active">Corredor</button>
+          <button data-env="labyrinth">Laberinto</button>
+        </div>
+        <button id="demo-btn" class="dock-btn"><span class="rec"></span> Recorrido auto</button>
+        <button id="reset-btn" class="dock-btn" title="Reiniciar posición (R)">Reiniciar</button>
+        <button id="orbit-btn" class="dock-btn active model-only">Órbita auto</button>
+        <button id="annot-btn" class="dock-btn active model-only">Anotaciones</button>
+        <span class="dock-hint" id="dock-hint">Persona usuaria con discapacidad visual · arrastra para orbitar</span>
+      </div>
+
+      <div class="dock-right">
+        <button id="lidar-toggle" class="dock-btn active" title="Alternar visualización LiDAR (L)">LiDAR</button>
+        <button id="sonar-toggle" class="dock-btn active" title="Pulsos sonoros de proximidad">Sonar</button>
+        <button id="sound-toggle" class="dock-btn active" title="Audio del simulador">Audio</button>
+      </div>
+    </footer>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="xr-note" class="xr-note" hidden>WebXR activo · usa el joystick para desplazarte</div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
