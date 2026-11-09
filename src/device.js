@@ -443,7 +443,7 @@ export function createAuraRig() {
   /* ---------------- Arnés ---------------- */
   const harness = new THREE.Group();
   harness.name = 'Harness';
-  root.add(harness);
+  body.add(harness);
 
   const strap = (pts, width = 0.038, thickness = 0.006, hint = new THREE.Vector3(1, 0, 0), closed = false) => {
     const geo = ribbonGeometry(pts.map((p) => new THREE.Vector3(...p)), width, thickness, hint, 80, closed);
@@ -592,7 +592,7 @@ export function createAuraRig() {
   const device = new THREE.Group();
   device.name = 'AURA_Device';
   device.position.set(0, 1.29, 0.175);
-  root.add(device);
+  body.add(device);
 
   const boxGeo = new RoundedBoxGeometry(0.155, 0.185, 0.082, 6, 0.014);
   const mainBox = new THREE.Mesh(boxGeo, navy);
@@ -839,6 +839,11 @@ export function createAuraRig() {
   cameraAnchor.position.set(0, -0.051, 0.085);
   device.add(cameraAnchor);
 
+  // Altura de ojos para la vista sentada
+  const headAnchor = new THREE.Object3D();
+  headAnchor.position.set(0, 0.075, 0.06);
+  headGroup.add(headAnchor);
+
   /* ----- Resaltado de componentes (marco tipo escáner) ----- */
   const highlightGroup = new THREE.Group();
   highlightGroup.visible = false;
@@ -899,34 +904,40 @@ export function createAuraRig() {
   };
 
   let walkPhase = 0;
+  let seatBlend = 0;
+  const mix = (a, b, t) => a + (b - a) * t;
 
-  function update(dt, { speed = 0, moving = false, scanning = true, pov = false } = {}) {
+  function update(dt, { speed = 0, moving = false, scanning = true, pov = false, seated = false } = {}) {
     time += dt;
     if (scanning) scanSpin += dt * 9.5;
     drum.rotation.y = scanSpin;
 
     const t = time;
+    seatBlend += ((seated ? 1 : 0) - seatBlend) * (1 - Math.exp(-8 * dt));
     // Respiración
     const breath = Math.sin(t * 1.6) * 0.006;
     torso.scale.y = 1 + breath;
     headGroup.position.y = 1.6 - breath * 0.35;
-    headGroup.rotation.y = Math.sin(t * 0.42) * 0.1;
-    headGroup.rotation.x = Math.sin(t * 0.55) * 0.02 - 0.02;
+    headGroup.rotation.y = Math.sin(t * 0.42) * 0.1 * (1 - seatBlend * 0.6);
+    headGroup.rotation.x = Math.sin(t * 0.55) * 0.02 - 0.02 + seatBlend * 0.05;
 
-    // Caminata procedural
+    // Caminata procedural (se desvanece al sentarse)
     const targetAmp = moving ? Math.min(0.75, 0.24 + speed * 0.22) : 0;
     walkPhase += dt * (moving ? 5.2 + speed * 1.5 : 0);
     const swing = Math.sin(walkPhase) * targetAmp;
-    leftLeg.pivot.rotation.x = swing;
-    rightLeg.pivot.rotation.x = -swing;
-    leftLeg.knee.rotation.x = Math.max(0, -Math.sin(walkPhase) * 0.55 * targetAmp * 2);
-    rightLeg.knee.rotation.x = Math.max(0, Math.sin(walkPhase) * 0.55 * targetAmp * 2);
-    leftArm.rotation.x = -swing * 0.65 - 0.05;
-    rightArm.rotation.x = swing * 0.22 - 0.05;
+    leftLeg.pivot.rotation.x = mix(swing, -1.42, seatBlend);
+    rightLeg.pivot.rotation.x = mix(-swing, -1.42, seatBlend);
+    leftLeg.knee.rotation.x = mix(Math.max(0, -Math.sin(walkPhase) * 0.55 * targetAmp * 2), 1.44, seatBlend);
+    rightLeg.knee.rotation.x = mix(Math.max(0, Math.sin(walkPhase) * 0.55 * targetAmp * 2), 1.44, seatBlend);
+    leftArm.rotation.x = mix(-swing * 0.65 - 0.05, -0.58, seatBlend);
+    rightArm.rotation.x = mix(swing * 0.22 - 0.05, -0.46, seatBlend);
+    leftArm.rotation.z = mix(-0.14, -0.24, seatBlend);
+    rightArm.rotation.z = mix(0.14, 0.3, seatBlend);
 
-    // Bob del cuerpo
-    body.position.y = moving ? Math.abs(Math.sin(walkPhase)) * 0.014 : 0;
-    body.rotation.z = moving ? Math.sin(walkPhase) * 0.008 : 0;
+    // Bob del cuerpo / descenso al sentarse
+    const bob = moving ? Math.abs(Math.sin(walkPhase)) * 0.014 : 0;
+    body.position.y = bob * (1 - seatBlend) - 0.46 * seatBlend;
+    body.rotation.z = moving ? Math.sin(walkPhase) * 0.008 * (1 - seatBlend) : 0;
 
     // LED parpadeante
     const blink = 0.6 + Math.sin(t * 2.4) * 0.25;
@@ -959,6 +970,7 @@ export function createAuraRig() {
     drum,
     lidarAnchor,
     cameraAnchor,
+    headAnchor,
     hotspotLocals,
     setHighlight,
     update,

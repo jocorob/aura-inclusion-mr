@@ -65,6 +65,14 @@ export class HUD {
     this.visionLayer = document.getElementById('vision-layer');
     this.specCard = document.getElementById('spec-card');
     this.pipelineTag = document.getElementById('pipeline-tag');
+    this.contextCard = document.getElementById('context-card');
+    this.contextEyebrow = document.getElementById('context-eyebrow');
+    this.contextTitle = document.getElementById('context-title');
+    this.contextText = document.getElementById('context-text');
+    this.contextItems = document.getElementById('context-items');
+    this.contextActions = document.getElementById('context-actions');
+    this.contextKey = null;
+    this.onContextClose = null;
 
     this.hotspots = [...document.querySelectorAll('.hotspot')];
     this.time = 0;
@@ -80,6 +88,7 @@ export class HUD {
 
     this.buildDetPool();
     this.bindSpec();
+    document.getElementById('context-close')?.addEventListener('click', () => this.onContextClose?.());
   }
 
   buildDetPool() {
@@ -210,6 +219,69 @@ export class HUD {
 
   hideSpec() {
     if (this.specCard) this.specCard.hidden = true;
+  }
+
+  showContext(key, { eyebrow = 'CERCA DE TI', title = '', text = '', items = [], actions = [] } = {}) {
+    if (!this.contextCard) return;
+    if (this.contextKey === key && !this.contextCard.hidden) return;
+    this.contextKey = key;
+    this.contextEyebrow.textContent = eyebrow;
+    this.contextTitle.textContent = title;
+    this.contextText.textContent = text;
+
+    this.contextItems.innerHTML = '';
+    for (const item of items) {
+      const chip = document.createElement('span');
+      chip.className = 'ctx-chip';
+      const b = document.createElement('b');
+      b.textContent = item.label;
+      chip.appendChild(b);
+      if (item.meta) {
+        const em = document.createElement('em');
+        em.textContent = item.meta;
+        chip.appendChild(em);
+      }
+      this.contextItems.appendChild(chip);
+    }
+    this.contextItems.hidden = items.length === 0;
+
+    this.contextActions.innerHTML = '';
+    for (const action of actions) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ctx-action';
+      if (action.primary) btn.classList.add('primary');
+      if (action.active) btn.classList.add('active');
+      if (action.hint) {
+        const kbd = document.createElement('kbd');
+        kbd.textContent = action.hint;
+        btn.appendChild(kbd);
+      }
+      const label = document.createElement('span');
+      label.textContent = action.label;
+      btn.appendChild(label);
+      btn.addEventListener('click', () => {
+        this.contextKey = null;
+        action.onClick?.();
+      });
+      this.contextActions.appendChild(btn);
+    }
+    this.contextActions.hidden = actions.length === 0;
+
+    this.contextCard.hidden = false;
+    document.body.classList.add('context-open');
+  }
+
+  hideContext() {
+    if (!this.contextCard || this.contextCard.hidden) {
+      this.contextKey = null;
+      return;
+    }
+    this.contextCard.hidden = true;
+    this.contextKey = null;
+    this.contextItems.innerHTML = '';
+    this.contextActions.innerHTML = '';
+    document.body.classList.remove('context-open');
   }
 
   updateHotspots(rig, camera, mode, activePart) {

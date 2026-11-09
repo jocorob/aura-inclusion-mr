@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createHomeEnvironment } from './home.js';
 import {
   makeCanvas,
   canvasTexture,
@@ -16,6 +17,7 @@ import {
  * Devuelve malla, colisionadores 2D, objetivos de raycast, zonas y punto de inicio.
  */
 export function createEnvironment(kind = 'corridor') {
+  if (kind === 'home') return createHomeEnvironment();
   const group = new THREE.Group();
   group.name = `Environment_${kind}`;
   const colliders = [];

@@ -20,7 +20,7 @@ AURA es un prototipo de asistencia visual para personas ciegas o con baja visió
 - **IMU de 9 ejes** para estabilización y fusión sensorial.
 - **Raspberry Pi 5** como núcleo de cómputo local: SLAM ligero, evaluación de riesgos y voz sintetizada **sin enviar datos a la nube**.
 
-Este repositorio contiene un **simulador web interactivo** del sistema: una persona usuaria con el arnés recorre un entorno urbano simulado, el LiDAR emite pulsos en tiempo real y el panel de telemetría muestra batería, latencia, sectores de riesgo, alertas espaciales y el pipeline Edge AI.
+Este repositorio contiene un **simulador web interactivo** del sistema: una persona usuaria con el arnés recorre una **casa domótica adaptada** (sala, cocina y baño), un corredor institucional o un laberinto; el LiDAR emite pulsos en tiempo real y el panel de telemetría muestra batería, latencia, sectores de riesgo, alertas espaciales y el pipeline Edge AI.
 
 <div align="center">
   <img src="./aura%20prototipo%20foto%20realista.jpeg" alt="Prototipo AURA" width="45%">
@@ -54,14 +54,24 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 
 ### 2. Simulación sensorial en tiempo real
 
-- Dos entornos navegables: **Corredor** (pasillo institucional con banco, columnas, estanterías, puertas y señalética) y **Laberinto** (calles con esquinas y pasillos estrechos).
+- Tres entornos navegables: **Casa** (vivienda adaptada con sala, cocina, pasillo y baño), **Corredor** (pasillo institucional con banco, columnas, estanterías, puertas y señalética) y **Laberinto** (calles con esquinas y pasillos estrechos). Se cambia desde el selector del dock.
 - **480 rayos LiDAR** por barrido, alcance de 12 m y visualización de pulsos, puntos de impacto y vectores de mapeo.
 - Sectores de riesgo (frente, izquierda, derecha, frente-izquierda/frente-derecha) calculados a **10 Hz** sobre el barrido.
 - Detección de **obstáculos bajos** (bancos, bolardos, macetas) con la cámara simulada.
 - Sensores de **IMU / SLAM** representados en el radar y en la telemetría.
 - El avatar camina, corre y gira con animación procedural de piernas, brazos y bastón.
 
-### 3. Interfaz de voz local (Edge AI)
+### 3. Casa domótica adaptada
+
+El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y mobiliario modelados a escala. Incluye:
+
+- **Sala**: sofá de dos plazas, mesa de centro, mueble de TV, lámpara de pie, planta y dos estanterías con objetos etiquetados. Al acercarse a una estantería, AURA enumera los objetos estante por estante (arriba, tercer estante, segundo y abajo) en voz alta y en la tarjeta contextual.
+- **Cocina**: barra con taburetes y lámparas colgantes, encimera, mesa de desayuno y **nevera interactiva**. Al abrirla con `E`, la puerta se abre, se enciende la luz interior y AURA describe el contenido: *«En el estante superior hay yogur y queso; en el estante medio, leche y agua; abajo, manzanas y verduras. ¿Qué andas buscando?»*. Las opciones `1`–`4` responden con la localización exacta de cada producto simulado.
+- **Pasillo y baño**: consola, lavabo, inodoro, ducha y espejo, con colisiones independientes.
+- **Sentarse**: junto al sofá, `S` sienta al avatar; la cámara pasa a la altura de los ojos sentado, el arnés y la caja AURA bajan con el cuerpo, las piernas se flexionan y el LiDAR sigue activo. `S`, `E` o `Esc` vuelven a poner de pie.
+- Colisiones AABB precisas para paredes, puertas y mobiliario; los objetos bajos también alimentan la detección de riesgos de la cámara.
+
+### 4. Interfaz de voz local (Edge AI)
 
 - Alertas en español natural con distancia, lado y recomendación de paso: *«Pared al frente a 1,2 metros. Paso libre a la derecha.»*, *«¡Alto! Obstáculo a tu izquierda a 40 centímetros.»*.
 - Subtítulos sincronizados en el panel **Voz local**, cola de mensajes con prioridad y repetición controlada para no saturar.
@@ -69,7 +79,7 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 - La demo sintetiza la voz en el propio navegador (Web Speech API, es-ES) y simula el pipeline **Whisper tiny + Piper TTS (davefx)** del Raspberry Pi 5. No hay peticiones de audio a servidores.
 - Preguntas rápidas («¿Qué hay delante?», «¿Por dónde salgo?», «Describe el entorno») y micrófono si el navegador expone reconocimiento de voz.
 
-### 4. Telemetría y control
+### 5. Telemetría y control
 
 - Batería, autonomía estimada, consumo, voltaje y estado de carga.
 - **Latencia local**, carga de CPU, temperatura y FPS.
@@ -91,7 +101,11 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 | Activar/desactivar voz | `V` |
 | Reiniciar posición | `R` |
 | Mostrar/ocultar paneles | `M` |
-| Cerrar fichas y paneles | `Esc` |
+| Interactuar (nevera, estantería, sofá) | `E` |
+| Sentarse / levantarse del sofá | `S` (junto al sofá) |
+| Elegir producto de la nevera | `1` `2` `3` `4` |
+| Cambiar de entorno | Botones **Casa / Corredor / Laberinto** del dock |
+| Cerrar fichas, tarjetas y paneles | `Esc` |
 | Mirar alrededor | Arrastrar con el ratón |
 | Zoom | Rueda del ratón |
 | Inspeccionar el dispositivo | Pestaña **Modelo 3D** → arrastrar y pulsar los puntos |
@@ -99,7 +113,7 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 ### Móvil
 
 - D-pad en la barra inferior para caminar.
-- Botones de cámara (3ª persona / POV AURA), entorno (Corredor / Laberinto), recorrido automático y reinicio.
+- Botones de cámara (3ª persona / POV AURA), entorno (Casa / Corredor / Laberinto), recorrido automático y reinicio.
 - Botones de telemetría y voz en la barra superior.
 - Arrastrar sobre la escena para mirar.
 
@@ -117,6 +131,7 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 ├── src/
 │   ├── main.js                # App: render, cámara, entrada, riesgo, XR, modo modelo
 │   ├── device.js              # Avatar + arnés + caja + cámara + LiDAR (Three.js)
+│   ├── home.js                # Casa: sala, cocina, baño, estanterías, nevera y sofá
 │   ├── environment.js         # Corredor y laberinto: geometría, colisiones, obstáculos
 │   ├── lidar.js               # Barrido de 480 rayos, puntos, sectores y etiquetas
 │   ├── voice.js               # Cola de voz, subtítulos y sonar
@@ -134,6 +149,7 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 - **WebXR API** para sesiones inmersivas VR/AR.
 - **Web Audio API** para el sonar y **Web Speech API** para la voz en español.
 - Geometría y texturas generadas en canvas: no se descargan modelos ni imágenes externas.
+- **Contenido de la Casa** generado en código: muebles, productos de la nevera y objetos de las estanterías; la descripción se apoya en la misma cola de voz local.
 
 ## Desarrollo local
 
@@ -172,6 +188,7 @@ AURA procesa audio, vídeo y escaneo LiDAR **dentro del dispositivo**. El simula
 - Controles de teclado completos, foco visible, etiquetas ARIA y `aria-live` para las alertas.
 - Botones táctiles grandes y diseño responsive.
 - Modo de movimiento reducido respetado por CSS (`prefers-reduced-motion`).
+- Interacciones anunciadas en voz y en la tarjeta contextual, no solo visualmente; botones de producto con etiqueta y atajo de teclado.
 
 ## Créditos
 

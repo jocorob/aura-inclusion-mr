@@ -15,18 +15,34 @@ import { Telemetry } from './telemetry.js';
 import { VoiceSystem, Sonar } from './voice.js';
 import { clamp, damp, lerp, resolveCircleAABB, wrapAngle, disposeObject } from './utils.js';
 
-const DEMO_PATH = [
-  { x: 0, z: 0.8 },
-  { x: -0.5, z: -0.7 },
-  { x: -0.85, z: -2.4 },
-  { x: -0.72, z: -4.6 },
-  { x: 0.15, z: -6.1 },
-  { x: -0.2, z: -8.3 },
-  { x: 0.0, z: -10.4 },
-  { x: 0.0, z: -13.1 },
-  { x: 1.45, z: -14.4 },
-  { x: 0.1, z: -15.5 },
-];
+const DEMO_PATHS = {
+  corridor: [
+    { x: 0, z: 0.8 },
+    { x: -0.5, z: -0.7 },
+    { x: -0.85, z: -2.4 },
+    { x: -0.72, z: -4.6 },
+    { x: 0.15, z: -6.1 },
+    { x: -0.2, z: -8.3 },
+    { x: 0.0, z: -10.4 },
+    { x: 0.0, z: -13.1 },
+    { x: 1.45, z: -14.4 },
+    { x: 0.1, z: -15.5 },
+  ],
+  // Paseo guiado por la casa: sala -> cocina -> pasillo -> baño
+  home: [
+    { x: -3.3, z: 2.2 },
+    { x: -4.5, z: 2.2 },
+    { x: -3.8, z: 0.9 },
+    { x: -2.2, z: 0.9 },
+    { x: -1.2, z: 0.2 },
+    { x: 0.4, z: 0.5 },
+    { x: 1.9, z: 0.2 },
+    { x: 2.2, z: -1.9 },
+    { x: 2.3, z: -3.1 },
+    { x: 3.9, z: -3.15 },
+    { x: 4.5, z: -2.85 },
+  ],
+};
 
 const fmtDist = (d) => {
   if (!isFinite(d)) return 'más de 12 metros';
@@ -72,16 +88,27 @@ class App {
     this.xrMode = null;
     this.xrSaved = null;
     this.hasFirstInput = false;
-    this.intro = { active: true, t: 0, duration: 7.2 };
+    this.intro = { active: false, t: 0, duration: 7.2 };
     this.riskArmAt = performance.now() + 2200;
 
-    this.player = { x: 0, z: 0.8, yaw: Math.PI };
+    this.seated = false;
+    this.seat = null;
+    this.preSitCamera = 'third';
+    this.fridgeOpen = false;
+    this.fridgeSelected = null;
+    this.contextMuted = null;
+    this.contextCurrentId = null;
+    this.contextTimer = 0;
+    this.shelfSpoken = new Set();
+    this.lastShelfAt = 0;
+
+    this.player = { x: -3.3, z: 2.2, yaw: 2.0 };
     this.input = { x: 0, z: 0, run: false };
     this.virtual = { forward: false, back: false, left: false, right: false, run: false };
-    this.viewYaw = Math.PI;
+    this.viewYaw = 2.0;
     this.viewPitch = 0;
     this.thirdPitch = 0.16;
-    this.thirdDist = 3.1;
+    this.thirdDist = 2.4;
 
     this.tmpVec = new THREE.Vector3();
     this.tmpVec2 = new THREE.Vector3();
@@ -103,7 +130,7 @@ class App {
       this.hud.setMode('sim');
       this.hud.setUtterance(this.lastUtterance, false);
       this.hud.log('Sistema iniciado · pipeline local en línea', 'info');
-      this.hud.toast('Presentación del arnés · arrastra o camina para tomar el control', 5200);
+      this.hud.toast('Casa AURA · WASD para caminar · E interactuar · S sentarse', 5600);
     }, 700);
   }
 
@@ -169,7 +196,7 @@ class App {
     });
     this.scene.add(this.rig.root);
 
-    this.env = createEnvironment('corridor');
+    this.env = createEnvironment('home');
     this.scene.add(this.env.group);
 
     this.lidar = new LidarSystem(this.scene);
@@ -192,10 +219,15 @@ class App {
     this.hud.setVoiceEnabled(true);
     this.hud.setLidarEnabled(true);
     this.hud.setCameraMode('third');
+    this.hud.setEnv(this.env.kind);
+    this.hud.onContextClose = () => {
+      this.contextMuted = this.contextCurrentId;
+      this.hud.hideContext();
+    };
   }
 
   initCamera() {
-    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.05, 160);
+    this.camera = new THREE.PerspectiveCamera(window.innerWidth < 640 ? 66 : 58, window.innerWidth / window.innerHeight, 0.05, 160);
     this.camera.position.set(1.35, 1.49, 1.78);
     this.scene.add(this.camera);
 
@@ -360,14 +392,47 @@ class App {
   onKeyDown(e) {
     if (e.repeat) return;
     const k = e.code;
-    if (['ArrowUp', 'KeyW'].includes(k)) this.input.z = 1;
-    if (['ArrowDown', 'KeyS'].includes(k)) this.input.z = -1;
-    if (['ArrowLeft', 'KeyA'].includes(k)) this.input.x = -1;
-    if (['ArrowRight', 'KeyD'].includes(k)) this.input.x = 1;
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) {
-      this.cancelDemo();
+
+    // Sentarse / levantarse es contextual: solo junto al sofá.
+    const nearSofa = this.getNearestInteractable('sofa');
+    if (k === 'KeyS' && !this.seated && nearSofa && this.speed < 0.55) {
+      e.preventDefault();
+      this.sitOnSofa(nearSofa);
+      return;
     }
-    if (k === 'ShiftLeft' || k === 'ShiftRight') this.input.run = true;
+    if (this.seated) {
+      if (k === 'KeyS' || k === 'KeyE' || k === 'Escape') {
+        e.preventDefault();
+        this.standUp();
+        return;
+      }
+    }
+
+    if (k === 'KeyE') {
+      e.preventDefault();
+      this.interact();
+      return;
+    }
+    if (this.fridgeOpen && ['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(k)) {
+      const fridge = this.getNearestInteractable('fridge');
+      const idx = Number(k.slice(-1)) - 1;
+      if (fridge?.products?.[idx]) {
+        e.preventDefault();
+        this.selectFridgeProduct(fridge.products[idx].id);
+        return;
+      }
+    }
+
+    if (!this.seated) {
+      if (['ArrowUp', 'KeyW'].includes(k)) this.input.z = 1;
+      if (['ArrowDown', 'KeyS'].includes(k)) this.input.z = -1;
+      if (['ArrowLeft', 'KeyA'].includes(k)) this.input.x = -1;
+      if (['ArrowRight', 'KeyD'].includes(k)) this.input.x = 1;
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) {
+        this.cancelDemo();
+      }
+      if (k === 'ShiftLeft' || k === 'ShiftRight') this.input.run = true;
+    }
     if (k === 'Space') {
       e.preventDefault();
       this.setCameraMode(this.camMode === 'third' ? 'pov' : 'third');
@@ -378,6 +443,7 @@ class App {
     if (k === 'KeyM') this.togglePanels();
     if (k === 'Escape') {
       this.hud.hideSpec();
+      if (!this.fridgeOpen) this.hud.hideContext();
       document.body.classList.remove('panels-hidden', 'show-data', 'show-voice');
     }
   }
@@ -449,6 +515,7 @@ class App {
   /* ================= Modo ================= */
   setMode(mode) {
     if (mode === this.mode && this.loaded) return;
+    if (mode === 'model' && this.seated) this.standUp();
     this.mode = mode;
     document.querySelectorAll('.tab').forEach((tab) => {
       const active = tab.dataset.mode === mode;
@@ -456,6 +523,7 @@ class App {
       tab.setAttribute('aria-selected', String(active));
     });
     this.hud.setMode(mode);
+    this.hud.hideContext();
     if (this.loaded) this.stopIntro();
     this.rig.setHighlight(null);
     this.activePart = null;
@@ -495,6 +563,8 @@ class App {
 
   setEnvironment(kind) {
     if (this.env.kind === kind) return;
+    this.env.setFridgeOpen?.(false);
+    this.hud.hideContext();
     this.scene.remove(this.env.group);
     disposeObject(this.env.group);
     this.env = createEnvironment(kind);
@@ -504,6 +574,19 @@ class App {
     this.lidar.reset();
     this.hud.setEnv(kind);
     this.stopIntro();
+    this.intro.active = kind !== 'home';
+    this.intro.t = 0;
+    this.seated = false;
+    this.seat = null;
+    this.preSitCamera = 'third';
+    this.fridgeOpen = false;
+    this.fridgeSelected = null;
+    this.rig.root.visible = true;
+    this.contextMuted = null;
+    this.contextCurrentId = null;
+    this.shelfSpoken.clear();
+    this.camMode = 'third';
+    this.hud.setCameraMode('third');
     const spawn = this.env.spawn;
     this.player.x = spawn.x;
     this.player.z = spawn.z;
@@ -511,6 +594,7 @@ class App {
     this.viewYaw = spawn.yaw;
     this.viewPitch = 0;
     this.thirdPitch = 0.16;
+    this.thirdDist = kind === 'home' ? 2.4 : 3.1;
     this.speed = 0;
     this.zone = '';
     this.cancelDemo();
@@ -518,14 +602,37 @@ class App {
     this.rig.root.rotation.y = this.player.yaw;
     this.hud.setZone(zoneAt(this.env, this.player.x, this.player.z));
     this.updateCamera(1 / 60, true);
-    this.hud.toast(kind === 'labyrinth' ? 'Laberinto procedural generado · sigue la voz de AURA' : 'Corredor institucional restaurado', 3000);
+    const toast = kind === 'home'
+      ? 'Casa adaptada cargada · sala, cocina y baño'
+      : kind === 'labyrinth'
+        ? 'Laberinto procedural generado · sigue la voz de AURA'
+        : 'Corredor institucional restaurado';
+    this.hud.toast(toast, 3200);
     if (this.voiceEnabled) {
-      this.speak(kind === 'labyrinth' ? 'Nuevo entorno cargado: laberinto de cinco por cinco. Escaneando salidas.' : 'Entorno de corredor cargado. Ruta despejada al frente.', { priority: 1, log: false });
+      const line = kind === 'home'
+        ? 'Casa domótica cargada. Estás en la sala, con el sofá y las estanterías cerca. La cocina queda al este y el baño al fondo del pasillo.'
+        : kind === 'labyrinth'
+          ? 'Nuevo entorno cargado: laberinto de cinco por cinco. Escaneando salidas.'
+          : 'Entorno de corredor cargado. Ruta despejada al frente.';
+      this.speak(line, { priority: 1, log: false });
     }
   }
 
   resetPosition() {
     const spawn = this.env.spawn;
+    const wasSeated = this.seated;
+    this.seated = false;
+    this.seat = null;
+    this.fridgeOpen = false;
+    this.fridgeSelected = null;
+    this.env.setFridgeOpen?.(false);
+    this.contextMuted = null;
+    this.shelfSpoken.clear();
+    this.hud.hideContext();
+    if (wasSeated && this.preSitCamera === 'third') {
+      this.camMode = 'third';
+      this.hud.setCameraMode('third');
+    }
     this.player.x = spawn.x;
     this.player.z = spawn.z;
     this.player.yaw = spawn.yaw;
@@ -537,6 +644,7 @@ class App {
     this.riskArmAt = performance.now() + 1200;
     this.rig.root.position.set(this.player.x, 0, this.player.z);
     this.rig.root.rotation.y = this.player.yaw;
+    this.hud.setZone(zoneAt(this.env, this.player.x, this.player.z));
     this.updateCamera(1 / 60, true);
     this.hud.toast('Posición reiniciada');
     this.speak('Posición reiniciada. Escaneando el entorno.', { priority: 2, log: false });
@@ -544,18 +652,22 @@ class App {
 
   toggleDemo() {
     if (this.env.kind === 'labyrinth') {
-      this.hud.toast('El recorrido automático está disponible en el corredor');
+      this.hud.toast('El recorrido automático está disponible en la casa y el corredor');
       return;
     }
+    if (this.seated) this.standUp();
     this.demo = !this.demo;
     document.getElementById('demo-btn')?.classList.toggle('active', this.demo);
     if (this.demo) {
+      this.demoPath = DEMO_PATHS[this.env.kind] || DEMO_PATHS.corridor;
       this.demoIndex = 0;
       this.demoStuck = 0;
       this.camMode = 'third';
       this.hud.setCameraMode('third');
-      this.hud.toast('Recorrido automático · AURA narra cada obstáculo', 3400);
-      this.speak('Iniciando recorrido guiado. Avanzaré despacio y te describiré el entorno.', { priority: 2 });
+      this.hud.toast(this.env.kind === 'home' ? 'Recorrido guiado por la casa · AURA narra el entorno' : 'Recorrido automático · AURA narra cada obstáculo', 3400);
+      this.speak(this.env.kind === 'home'
+        ? 'Iniciando recorrido guiado por la casa. Pasaremos por la sala, la cocina y el baño.'
+        : 'Iniciando recorrido guiado. Avanzaré despacio y te describiré el entorno.', { priority: 2 });
     } else {
       this.speed = 0;
       this.hud.toast('Recorrido automático detenido');
@@ -566,6 +678,302 @@ class App {
     if (!this.demo) return;
     this.demo = false;
     document.getElementById('demo-btn')?.classList.remove('active');
+  }
+
+  /* ================= Interacciones de la casa ================= */
+  distanceTo(point) {
+    return Math.hypot(point.x - this.player.x, point.z - this.player.z);
+  }
+
+  getNearestInteractable(type = null) {
+    const list = this.env.interactables || [];
+    let best = null;
+    let bestDist = Infinity;
+    for (const item of list) {
+      if (type && item.type !== type) continue;
+      const d = this.distanceTo(item.point);
+      if (d <= item.radius && d < bestDist) {
+        best = item;
+        bestDist = d;
+      }
+    }
+    return best;
+  }
+
+  joinEs(items) {
+    const clean = items.filter(Boolean);
+    if (!clean.length) return '';
+    if (clean.length === 1) return clean[0];
+    return `${clean.slice(0, -1).join(', ')} y ${clean[clean.length - 1]}`;
+  }
+
+  shelfLevelName(level) {
+    return ['Estante inferior', 'Segundo estante', 'Tercer estante', 'Estante superior'][level] || 'Estante';
+  }
+
+  describeShelfText(shelf, distance) {
+    const levelIntro = ['abajo', 'en el segundo estante', 'en el tercer estante', 'arriba'];
+    const parts = [];
+    for (const level of [3, 2, 1, 0]) {
+      const voices = shelf.items.filter((i) => i.level === level).map((i) => i.voice);
+      if (voices.length) parts.push(`${levelIntro[level]} hay ${this.joinEs(voices)}`);
+    }
+    const body = parts.join('; ');
+    return `${shelf.label}, a ${fmtDist(distance)}. ${body.charAt(0).toUpperCase()}${body.slice(1)}.`;
+  }
+
+  speakShelf(shelf, force = false) {
+    const d = this.distanceTo(shelf.point);
+    this.speak(this.describeShelfText(shelf, d), {
+      priority: force ? 3 : 1,
+      log: true,
+    });
+    this.contextTimer = 1;
+  }
+
+  renderContext(key, payload, id) {
+    this.contextCurrentId = id;
+    if (this.contextMuted === id) {
+      this.hud.hideContext();
+      return;
+    }
+    this.hud.showContext(key, payload);
+  }
+
+  sitOnSofa(sofa) {
+    if (!sofa?.seats?.length) return;
+    this.stopIntro();
+    let seat = sofa.seats[0];
+    let best = Infinity;
+    for (const candidate of sofa.seats) {
+      const d = Math.hypot(candidate.x - this.player.x, candidate.z - this.player.z);
+      if (d < best) {
+        best = d;
+        seat = candidate;
+      }
+    }
+    this.preSitCamera = this.camMode;
+    this.seated = true;
+    this.seat = seat;
+    this.cancelDemo();
+    this.input.x = 0;
+    this.input.z = 0;
+    this.speed = 0;
+    this.player.x = seat.x;
+    this.player.z = seat.z;
+    this.player.yaw = seat.yaw;
+    this.viewYaw = seat.yaw;
+    this.viewPitch = 0;
+    this.rig.root.position.set(this.player.x, 0, this.player.z);
+    this.rig.root.rotation.y = this.player.yaw;
+    this.lidar.reset();
+    this.riskArmAt = performance.now() + 900;
+    this.camMode = 'pov';
+    this.hud.setCameraMode('pov');
+    this.contextMuted = null;
+    this.contextTimer = 1;
+    this.updateCamera(1 / 60, true);
+    this.hud.toast('Sentado en el sofá · vista a la altura de los ojos', 3200);
+    this.speak('Te has sentado en el sofá. La vista se ajusta a la altura de los ojos y el LiDAR sigue escaneando la sala. Pulsa S para levantarte.', { priority: 2, log: true });
+  }
+
+  standUp() {
+    if (!this.seated) return;
+    this.stopIntro();
+    const seat = this.seat;
+    const yaw = seat?.yaw ?? this.player.yaw;
+    this.seated = false;
+    this.seat = null;
+    this.player.x += Math.sin(yaw) * 0.92;
+    this.player.z += Math.cos(yaw) * 0.92;
+    resolveCircleAABB(this.player, 0.32, this.env.colliders);
+    this.player.x = clamp(this.player.x, this.env.bounds.minX + 0.4, this.env.bounds.maxX - 0.4);
+    this.player.z = clamp(this.player.z, this.env.bounds.minZ + 0.4, this.env.bounds.maxZ - 0.4);
+    this.player.yaw = yaw;
+    this.viewYaw = yaw;
+    this.viewPitch = 0;
+    this.speed = 0;
+    this.input.x = 0;
+    this.input.z = 0;
+    const restore = this.preSitCamera || 'third';
+    this.camMode = restore;
+    this.hud.setCameraMode(restore);
+    this.rig.root.position.set(this.player.x, 0, this.player.z);
+    this.rig.root.rotation.y = this.player.yaw;
+    this.lidar.reset();
+    this.riskArmAt = performance.now() + 900;
+    this.contextMuted = null;
+    this.contextCurrentId = null;
+    this.hud.hideContext();
+    this.contextTimer = 1;
+    this.updateCamera(1 / 60, true);
+    this.hud.toast('De pie · LiDAR reactivado', 2400);
+    this.speak('De pie. Continuamos explorando la casa.', { priority: 2, log: true });
+  }
+
+  toggleFridge(force) {
+    this.stopIntro();
+    const fridge = this.getNearestInteractable('fridge') || this.env.interactables?.find((i) => i.type === 'fridge');
+    if (!fridge) return;
+    const open = typeof force === 'boolean' ? force : !this.fridgeOpen;
+    if (open && !this.fridgeOpen) {
+      const anchor = this.env.fridge?.group?.position || fridge.point;
+      const fx = anchor.x - this.player.x;
+      const fz = anchor.z - this.player.z;
+      if (Math.hypot(fx, fz) > 0.05) {
+        this.player.yaw = Math.atan2(fx, fz);
+        this.viewYaw = this.player.yaw;
+        this.viewPitch = 0;
+      }
+    }
+    this.fridgeOpen = open;
+    this.fridgeSelected = null;
+    this.env.setFridgeOpen?.(open);
+    this.contextMuted = null;
+    this.contextTimer = 1;
+    if (open) {
+      this.hud.toast('Nevera abierta · elige un producto', 3000);
+      this.speak('Nevera abierta. En el estante superior hay yogur y queso; en el estante medio, leche y agua; abajo, manzanas y verduras. ¿Qué andas buscando?', { priority: 3, log: true });
+    } else {
+      this.hud.toast('Nevera cerrada');
+      this.speak('Nevera cerrada.', { priority: 2, log: false });
+    }
+  }
+
+  selectFridgeProduct(id) {
+    this.stopIntro();
+    const fridge = this.env.interactables?.find((i) => i.type === 'fridge');
+    const product = fridge?.products?.find((p) => p.id === id);
+    if (!product) return;
+    this.fridgeSelected = id;
+    this.contextMuted = null;
+    this.contextTimer = 1;
+    this.hud.toast(`${product.name} · ${product.level}`, 3000);
+    this.speak(product.voice, { priority: 3, log: true });
+  }
+
+  interact() {
+    this.stopIntro();
+    if (this.seated) {
+      this.standUp();
+      return;
+    }
+    const near = this.getNearestInteractable();
+    if (!near) {
+      this.hud.toast('No hay nada interactivo al alcance');
+      this.speak('No detecto ningún objeto interactivo a tu alcance.', { priority: 1, log: false });
+      return;
+    }
+    if (near.type === 'fridge') this.toggleFridge();
+    else if (near.type === 'sofa') this.sitOnSofa(near);
+    else if (near.type === 'shelf') this.speakShelf(near, true);
+  }
+
+  updateInteractions(dt) {
+    this.contextTimer += dt;
+    if (this.contextTimer < 0.18) return;
+    this.contextTimer = 0;
+    const now = performance.now();
+    const list = this.env.interactables || [];
+    const fridge = list.find((i) => i.type === 'fridge');
+
+    // Cerrar la nevera al alejarse
+    if (this.fridgeOpen && fridge && this.distanceTo(fridge.point) > 2.55) {
+      this.fridgeOpen = false;
+      this.fridgeSelected = null;
+      this.env.setFridgeOpen?.(false);
+      this.contextMuted = null;
+      this.hud.hideContext();
+    }
+
+    // Narración automática de estanterías al acercarse
+    for (const item of list) {
+      if (item.type !== 'shelf') continue;
+      const d = this.distanceTo(item.point);
+      if (d > item.radius + 0.9) this.shelfSpoken.delete(item.id);
+      if (!this.seated && !this.fridgeOpen && d <= item.radius && !this.shelfSpoken.has(item.id) && now - this.lastShelfAt > 2200) {
+        this.shelfSpoken.add(item.id);
+        this.lastShelfAt = now;
+        this.speak(this.describeShelfText(item, d), { priority: 1, log: true });
+      }
+    }
+
+    if (this.seated) {
+      this.renderContext('seated', {
+        eyebrow: `SENTADO · ${(this.zone || 'SALA').toUpperCase()}`,
+        title: 'Sentado en el sofá',
+        text: 'El arnés sigue escaneando la sala y el LiDAR permanece activo. La vista está ajustada a la altura de los ojos sentado.',
+        items: [],
+        actions: [{ label: 'Levantarse del sofá', hint: 'S', primary: true, onClick: () => this.standUp() }],
+      }, 'sofa-sala');
+      return;
+    }
+
+    const near = this.getNearestInteractable();
+    if (!near) {
+      this.hud.hideContext();
+      this.contextCurrentId = null;
+      this.contextMuted = null;
+      return;
+    }
+    if (this.contextMuted && this.contextMuted !== near.id) this.contextMuted = null;
+    const d = this.distanceTo(near.point);
+    const distLabel = d < 1 ? `${Math.round(d * 100)} cm` : `${d.toFixed(1).replace('.', ',')} m`;
+    const zone = (this.zone || '').toUpperCase();
+
+    if (near.type === 'fridge') {
+      if (this.fridgeOpen) {
+        const selected = near.products?.find((p) => p.id === this.fridgeSelected);
+        this.renderContext(`fridge:open:${this.fridgeSelected || 'none'}:${d.toFixed(1)}`, {
+          eyebrow: `NEVERA ABIERTA · A ${distLabel} · ${zone}`,
+          title: selected ? `${selected.name}, localizado` : '¿Qué andas buscando?',
+          text: selected
+            ? `${selected.voice} Puedes elegir otro producto o cerrar la nevera.`
+            : 'AURA ha abierto la nevera y ha etiquetado el interior. Elige un producto o pulsa E para cerrar.',
+          items: (near.products || []).map((p) => ({ label: p.name, meta: p.level })),
+          actions: [
+            ...(near.products || []).map((p, i) => ({
+              label: p.name,
+              hint: String(i + 1),
+              active: this.fridgeSelected === p.id,
+              onClick: () => this.selectFridgeProduct(p.id),
+            })),
+            { label: 'Cerrar nevera', hint: 'E', onClick: () => this.toggleFridge(false) },
+          ],
+        }, near.id);
+      } else {
+        this.renderContext(`fridge:closed:${d.toFixed(1)}`, {
+          eyebrow: `NEVERA · A ${distLabel} · ${zone}`,
+          title: 'Nevera',
+          text: 'Puerta cerrada. AURA puede abrirla, describir el interior y ayudarte a encontrar un producto.',
+          items: [],
+          actions: [{ label: 'Abrir nevera', hint: 'E', primary: true, onClick: () => this.toggleFridge(true) }],
+        }, near.id);
+      }
+      return;
+    }
+
+    if (near.type === 'sofa') {
+      this.renderContext(`sofa:${d.toFixed(1)}`, {
+        eyebrow: `SOFÁ · A ${distLabel} · ${zone}`,
+        title: 'Sofá de la sala',
+        text: 'Siéntate para descansar. La cámara bajará a la altura de los ojos y el LiDAR seguirá activo. Pulsa S junto al sofá.',
+        items: [],
+        actions: [{ label: 'Sentarse en el sofá', hint: 'S', primary: true, onClick: () => this.sitOnSofa(near) }],
+      }, near.id);
+      return;
+    }
+
+    if (near.type === 'shelf') {
+      const items = near.items.map((i) => ({ label: i.name, meta: this.shelfLevelName(i.level) }));
+      this.renderContext(`shelf:${near.id}:${d.toFixed(1)}`, {
+        eyebrow: `OBJETOS A ${distLabel} · ${zone}`,
+        title: near.label,
+        text: `${this.describeShelfText(near, d)} Pulsa «Describir» para volver a escucharla.`,
+        items,
+        actions: [{ label: 'Describir estantería', hint: 'E', primary: true, onClick: () => this.speakShelf(near, true) }],
+      }, near.id);
+    }
   }
 
   /* ================= Bucle ================= */
@@ -615,6 +1023,7 @@ class App {
   }
 
   updateSimulation(dt) {
+    this.env.update?.(dt);
     if (this.demo) this.updateDemo(dt);
     this.updateIntro(dt);
     this.updatePlayer(dt);
@@ -624,6 +1033,7 @@ class App {
       moving: this.speed > 0.12,
       scanning: this.lidarEnabled,
       pov: this.camMode === 'pov',
+      seated: this.seated,
     });
     this.rig.root.updateMatrixWorld(true);
 
@@ -636,6 +1046,7 @@ class App {
     this.hud.updateDetections(this.camera, this.env.obstacles, sensor, this.camMode === 'pov');
 
     this.updateZone(dt);
+    this.updateInteractions(dt);
     this.updateRisk(dt, sensor);
     this.updateBatteryAlerts();
     this.telemetry.update(dt, {
@@ -652,10 +1063,11 @@ class App {
     this.intro.t += dt;
     const k = clamp(this.intro.t / this.intro.duration, 0, 1);
     const ease = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
-    const startYaw = this.player.yaw + 2.0;
+    const home = this.env.kind === 'home';
+    const startYaw = this.player.yaw + (home ? -0.85 : 2.0);
     this.viewYaw = startYaw + wrapAngle(this.player.yaw - startYaw) * ease;
     this.thirdPitch = lerp(0.03, 0.16, ease);
-    this.thirdDist = lerp(1.85, 3.1, ease);
+    this.thirdDist = lerp(home ? 2.1 : 1.85, home ? 2.4 : 3.1, ease);
     if (k >= 1) this.intro.active = false;
   }
 
@@ -673,6 +1085,12 @@ class App {
   }
 
   updatePlayer(dt) {
+    if (this.seated) {
+      this.speed = damp(this.speed, 0, 8, dt);
+      this.rig.root.position.set(this.player.x, 0, this.player.z);
+      this.rig.root.rotation.y = this.player.yaw;
+      return;
+    }
     const input = this.getMoveInput();
     const yaw = this.viewYaw;
     const moving = Math.hypot(input.x, input.z) > 0.01;
@@ -708,16 +1126,19 @@ class App {
   }
 
   updateDemo(dt) {
-    if (this.demoIndex >= DEMO_PATH.length) {
+    const path = this.demoPath || DEMO_PATHS.corridor;
+    if (this.demoIndex >= path.length) {
       this.demo = false;
       this.input.x = 0;
       this.input.z = 0;
       document.getElementById('demo-btn')?.classList.remove('active');
-      this.speak('Recorrido completado. Has llegado al vestíbulo. Fin de la demostración.', { priority: 2 });
+      this.speak(this.env.kind === 'home'
+        ? 'Recorrido completado. Estás en el baño de la casa. Fin de la demostración.'
+        : 'Recorrido completado. Has llegado al vestíbulo. Fin de la demostración.', { priority: 2 });
       this.hud.toast('Recorrido completado');
       return;
     }
-    const target = DEMO_PATH[this.demoIndex];
+    const target = path[this.demoIndex];
     const dx = target.x - this.player.x;
     const dz = target.z - this.player.z;
     const dist = Math.hypot(dx, dz);
@@ -751,14 +1172,22 @@ class App {
   updateCamera(dt, snap = false) {
     this.rig.root.updateMatrixWorld(true);
     if (this.camMode === 'pov') {
-      const p = this.rig.cameraAnchor.getWorldPosition(this.tmpVec2);
+      const anchor = this.seated ? this.rig.headAnchor : this.rig.cameraAnchor;
+      const p = anchor.getWorldPosition(this.tmpVec2);
       const fx = Math.sin(this.viewYaw);
       const fz = Math.cos(this.viewYaw);
       this.camera.position.set(p.x + fx * 0.03, p.y, p.z + fz * 0.03);
       this.camera.rotation.order = 'YXZ';
       this.camera.rotation.set(this.viewPitch, this.viewYaw + Math.PI, 0);
     } else {
-      const target = new THREE.Vector3(this.player.x, 1.24, this.player.z);
+      const target = new THREE.Vector3(this.player.x, this.seated ? 0.92 : 1.24, this.player.z);
+      if (this.env.kind === 'home') {
+        // Plano sobre el hombro: deja ver la nevera y las estanterías sin que el avatar las tape.
+        const rx = Math.cos(this.viewYaw);
+        const rz = -Math.sin(this.viewYaw);
+        target.x += rx * 0.32;
+        target.z += rz * 0.32;
+      }
       const dist = this.thirdDist;
       const fx = Math.sin(this.viewYaw);
       const fz = Math.cos(this.viewYaw);
@@ -937,17 +1366,39 @@ class App {
         answer = `${scan.frontHit?.label || 'Obstáculo'} al frente a ${fmtDist(scan.front)}.${side}`;
       }
     } else if (kind === 'exit') {
-      const gate = this.env.kind === 'labyrinth' ? { x: 0, z: 0 } : { x: 0, z: 4 };
-      const d = Math.hypot(gate.x - this.player.x, gate.z - this.player.z);
-      if (this.env.kind === 'labyrinth') {
-        answer = `Estás en ${this.zone}. La salida del laberinto queda hacia el norte; te guiaré bordeando la pared de tu derecha.`;
+      if (this.env.kind === 'home') {
+        const dx = -4.95 - this.player.x;
+        const dz = 4.38 - this.player.z;
+        const d = Math.hypot(dx, dz);
+        const rel = wrapAngle(Math.atan2(dx, dz) - this.player.yaw);
+        const side = Math.abs(rel) < 0.65 ? 'justo detrás de ti' : rel > 0 ? 'a tu derecha' : 'a tu izquierda';
+        answer = `La puerta de entrada está a ${fmtDist(Math.max(0.4, d))}, ${side}, en la pared sur de la sala.`;
       } else {
-        answer = `La salida está a ${fmtDist(Math.max(0.3, d))} detrás de ti, por el pasillo principal. También hay un vestíbulo al frente.`;
+        const gate = this.env.kind === 'labyrinth' ? { x: 0, z: 0 } : { x: 0, z: 4 };
+        const d = Math.hypot(gate.x - this.player.x, gate.z - this.player.z);
+        if (this.env.kind === 'labyrinth') {
+          answer = `Estás en ${this.zone}. La salida del laberinto queda hacia el norte; te guiaré bordeando la pared de tu derecha.`;
+        } else {
+          answer = `La salida está a ${fmtDist(Math.max(0.3, d))} detrás de ti, por el pasillo principal. También hay un vestíbulo al frente.`;
+        }
       }
     } else {
-      const count = scan.contour.filter((p) => p.d < 4.5).length;
-      const nearest = scan.min;
-      answer = `Estás en ${this.zone}. Detecto ${count} puntos de contacto en menos de cuatro metros y medio. El obstáculo más próximo está a ${fmtDist(nearest)}.`;
+      if (this.env.kind === 'home') {
+        const near = this.getNearestInteractable();
+        const nearText = near ? ` Tienes ${near.label.toLowerCase()} a ${fmtDist(this.distanceTo(near.point))}.` : '';
+        const roomText = this.zone === 'Cocina'
+          ? 'La isla, la encimera, la nevera y la mesa de desayuno están distribuidas a tu alrededor.'
+          : this.zone === 'Baño'
+            ? 'La puerta queda al oeste; el lavabo, el inodoro y la ducha están al este y al fondo.'
+            : this.zone === 'Pasillo'
+              ? 'El pasillo conecta la cocina con el baño. La puerta del baño está al este.'
+              : 'La sala tiene sofá, mesa de centro, televisión y dos estanterías. La cocina queda al este y el baño al fondo del pasillo.';
+        answer = `Estás en ${this.zone}.${nearText} ${roomText}`;
+      } else {
+        const count = scan.contour.filter((p) => p.d < 4.5).length;
+        const nearest = scan.min;
+        answer = `Estás en ${this.zone}. Detecto ${count} puntos de contacto en menos de cuatro metros y medio. El obstáculo más próximo está a ${fmtDist(nearest)}.`;
+      }
     }
     this.hud.log(answer, 'info');
     this.speak(answer, { priority: 3 });
@@ -1156,6 +1607,7 @@ class App {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
+    this.camera.fov = w < 640 ? 66 : 58;
     this.camera.updateProjectionMatrix();
     if (this.composer) {
       this.composer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
