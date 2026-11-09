@@ -255,8 +255,22 @@
     <div class="zone-label" id="zone-label"><span>ZONA</span><b>Pasillo A</b></div>
     <div class="scene-tip" id="scene-tip">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> desplazarse
-      <span class="sep">·</span> arrastra para mirar
-      <span class="sep">·</span> <kbd>Espacio</kbd> cambia de cámara
+      <span class="sep">·</span> <kbd>E</kbd> interactuar
+      <span class="sep">·</span> <kbd>S</kbd> sentarse
+      <span class="sep">·</span> <kbd>Espacio</kbd> cámara
+    </div>
+
+    <div id="context-card" class="context-card" role="region" aria-label="Interacción contextual" hidden>
+      <div class="context-head">
+        <div>
+          <div class="context-eyebrow" id="context-eyebrow">CERCA DE TI</div>
+          <h3 id="context-title">Sofá de la sala</h3>
+        </div>
+        <button class="context-close" id="context-close" aria-label="Cerrar interacción">×</button>
+      </div>
+      <p id="context-text"></p>
+      <div class="context-items" id="context-items"></div>
+      <div class="context-actions" id="context-actions"></div>
     </div>
 
     <!-- ===================== DOCK ===================== -->
@@ -277,7 +291,8 @@
           <button data-cam="pov">POV AURA</button>
         </div>
         <div class="seg" id="env-seg" role="group" aria-label="Entorno de simulación">
-          <button data-env="corridor" class="active">Corredor</button>
+          <button data-env="home" class="active">Casa</button>
+          <button data-env="corridor">Corredor</button>
           <button data-env="labyrinth">Laberinto</button>
         </div>
         <button id="demo-btn" class="dock-btn"><span class="rec"></span> Recorrido auto</button>
