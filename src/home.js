@@ -503,6 +503,64 @@ export function createHomeEnvironment() {
   book.position.set(-0.12, 0.445, -0.3);
   book.rotation.y = 0.25;
   coffee.add(book);
+
+  // Objetos cotidianos de la mesa de centro para el escaneo en POV.
+  const coffeeItems = [];
+  const addCoffeeItem = (meta, object, x, y, z, rot = 0) => {
+    object.position.set(x, y, z);
+    object.rotation.y = rot;
+    object.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.userData.itemLabel = meta.name;
+      }
+    });
+    coffee.add(object);
+    coffeeItems.push({ ...meta, object });
+  };
+  const remote = makeShelfItem('remote');
+  if (remote) addCoffeeItem({
+    name: 'Mando a distancia', voice: 'un mando a distancia', category: 'electrónica', count: 1,
+    summary: 'un mando a distancia', title: 'Mando de la televisión',
+    detail: 'Un mando de televisión con los botones de volumen y encendido en relieve; está sobre la mesa de centro.',
+  }, remote, 0.18, 0.44, 0.42, -0.35);
+  const mugs = makeShelfItem('mugs');
+  if (mugs) addCoffeeItem({
+    name: 'Tazas', voice: 'dos tazas de café', category: 'menaje', count: 2,
+    summary: 'dos tazas de café', title: 'Dos tazas de café',
+    detail: 'Dos tazas de cerámica sobre la mesa de centro; una blanca y otra verde, con las asas hacia fuera.',
+  }, mugs, -0.17, 0.43, 0.36, 0.2);
+  const magazine = new THREE.Group();
+  const magazineBody = new THREE.Mesh(
+    new THREE.BoxGeometry(0.22, 0.012, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0xd7c9ad, roughness: 0.82 })
+  );
+  magazineBody.position.y = 0.006;
+  magazine.add(magazineBody);
+  const magazineCover = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.2, 0.275),
+    new THREE.MeshStandardMaterial({ map: makeTextTexture('AURA', { bg: '#395a63', fg: '#f1e6ce', size: 44 }), roughness: 0.75 })
+  );
+  magazineCover.rotation.x = -Math.PI / 2;
+  magazineCover.position.y = 0.013;
+  magazine.add(magazineCover);
+  const magazineEdge = new THREE.Mesh(
+    new THREE.BoxGeometry(0.21, 0.006, 0.28),
+    new THREE.MeshStandardMaterial({ color: 0xb7a88e, roughness: 0.9 })
+  );
+  magazineEdge.position.y = 0.002;
+  magazine.add(magazineEdge);
+  addCoffeeItem({
+    name: 'Revista', voice: 'una revista', category: 'libros', count: 1,
+    summary: 'una revista', title: 'Revista de diseño',
+    detail: 'Una revista de diseño abierta sobre la mesa de centro, con fotos de interiores y titulares en letra grande.',
+  }, magazine, -0.02, 0.435, -0.56, 0.18);
+  interactables.push({
+    type: 'table', id: 'mesa-centro', label: 'Mesa de centro',
+    point: new THREE.Vector3(-2.35, 0, 1.6), radius: 1.45,
+    look: new THREE.Vector3(-2.35, 0.45, 1.6), items: coffeeItems,
+    scanPitch: { from: 0.02, to: -0.95, duration: 1900 }, finalPitch: -0.55,
+  });
   addObstacle(coffee, 'Mesa de centro', { low: true, w: 0.68, d: 1.42, labelOffset: 1.0 });
 
   // Mueble de TV y televisor
@@ -621,19 +679,89 @@ export function createHomeEnvironment() {
   islandBase.castShadow = true;
   islandBase.receiveShadow = true;
   island.add(islandBase);
-  const islandTop = new THREE.Mesh(new RoundedBoxGeometry(1.68, 0.06, 0.98, 3, 0.02), new THREE.MeshStandardMaterial({ color: 0xe8e4d7, roughness: 0.25, metalness: 0.1 }));
+  const islandTop = new THREE.Mesh(new RoundedBoxGeometry(1.68, 0.06, 0.98, 3, 0.02), new THREE.MeshStandardMaterial({ color: 0xb9b3a4, roughness: 0.52, metalness: 0.02 }));
   islandTop.position.y = 0.92;
   islandTop.castShadow = true;
   island.add(islandTop);
+  // Objetos de la barra para el escaneo y la interacción en POV.
+  const islandItems = [];
+  const addIslandItem = (meta, object, x, y, z, rot = 0) => {
+    object.position.set(x, y, z);
+    object.rotation.y = rot;
+    object.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.userData.itemLabel = meta.name;
+      }
+    });
+    island.add(object);
+    islandItems.push({ ...meta, object });
+  };
+
   // Frutero
+  const islandFruit = new THREE.Group();
   const fruitBowl = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.1, 0.09, 22), ceramicMat);
-  fruitBowl.position.set(-0.25, 0.99, 0);
-  island.add(fruitBowl);
+  fruitBowl.position.set(0, 0.045, 0);
+  islandFruit.add(fruitBowl);
   for (let i = 0; i < 3; i++) {
     const apple = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), new THREE.MeshStandardMaterial({ color: i === 1 ? 0x6e9a4a : 0xb64a3a, roughness: 0.6 }));
-    apple.position.set(-0.34 + i * 0.09, 1.04 + (i === 1 ? 0.03 : 0), 0.02 + (i - 1) * 0.05);
-    island.add(apple);
+    apple.position.set((i - 1) * 0.06, 0.11 + (i === 1 ? 0.025 : 0), (i - 1) * 0.045);
+    islandFruit.add(apple);
   }
+  addIslandItem({
+    name: 'Frutero', voice: 'un frutero con tres manzanas', category: 'fruta', count: 3,
+    summary: 'tres manzanas', title: 'Frutero de la barra',
+    detail: 'Un frutero de cerámica en el centro de la barra con tres manzanas, dos rojas y una verde.',
+  }, islandFruit, -0.3, 0.95, -0.03, 0.12);
+
+  // Platos apilados
+  const plates = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.09, 0.012, 22), ceramicMat);
+    plate.position.y = 0.006 + i * 0.016;
+    plates.add(plate);
+  }
+  addIslandItem({
+    name: 'Platos', voice: 'tres platos', category: 'vajilla', count: 3,
+    summary: 'tres platos', title: 'Tres platos llanos',
+    detail: 'Tres platos llanos de cerámica apilados junto al borde de la barra, listos para poner la mesa.',
+  }, plates, 0.48, 0.95, 0.22, 0);
+
+  // Vasos
+  const glasses = new THREE.Group();
+  const glassMatLocal = new THREE.MeshPhysicalMaterial({ color: 0xdfeef0, transparent: true, opacity: 0.55, roughness: 0.06, metalness: 0, clearcoat: 1, depthWrite: false });
+  for (let i = 0; i < 3; i++) {
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.034, 0.12, 14), glassMatLocal);
+    glass.position.set((i - 1) * 0.1, 0.06, (i % 2) * 0.03);
+    glasses.add(glass);
+  }
+  addIslandItem({
+    name: 'Vasos', voice: 'tres vasos', category: 'vasos', count: 3,
+    summary: 'tres vasos', title: 'Tres vasos de agua',
+    detail: 'Tres vasos de cristal transparente junto a la jarra, en la barra de la cocina.',
+  }, glasses, 0.46, 0.95, -0.28, -0.18);
+
+  // Tabla de picar
+  const board = new THREE.Group();
+  const boardTop = new THREE.Mesh(new RoundedBoxGeometry(0.36, 0.028, 0.24, 3, 0.012), woodMat);
+  boardTop.position.y = 0.014;
+  board.add(boardTop);
+  const boardHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 10), woodMat);
+  boardHandle.rotation.z = Math.PI / 2;
+  boardHandle.position.set(0.23, 0.03, 0);
+  board.add(boardHandle);
+  addIslandItem({
+    name: 'Tabla de picar', voice: 'una tabla de picar', category: 'menaje', count: 1,
+    summary: 'una tabla de picar', title: 'Tabla de picar',
+    detail: 'Una tabla de madera de olivo con asa, limpia y apoyada en la barra de la cocina.',
+  }, board, -0.52, 0.95, 0.3, 0.08);
+
+  interactables.push({
+    type: 'table', id: 'barra-cocina', label: 'Barra de cocina',
+    point: new THREE.Vector3(2.4, 0, 1.7), radius: 1.5,
+    look: new THREE.Vector3(2.4, 0.98, 1.7), items: islandItems,
+    scanPitch: { from: 0.04, to: -0.42, duration: 1600 }, finalPitch: -0.16,
+  });
   addObstacle(island, 'Barra de cocina', { low: true, w: 1.72, d: 1.0, labelOffset: 1.25 });
 
   // Taburetes
@@ -1250,6 +1378,8 @@ export function createHomeEnvironment() {
       { id: 'manzana', name: 'Manzanas', voice: 'Las manzanas están en el cajón de verduras, abajo.', level: 'Cajón inferior', category: 'fruta', count: 3, article: 'tres', summary: 'tres manzanas', title: 'Tres manzanas', detail: 'Tres manzanas frescas: dos rojas y una verde, en el cajón inferior.' },
       { id: 'agua', name: 'Agua', voice: 'El agua está en el estante del medio, a la derecha.', level: 'Estante medio', category: 'bebidas', count: 1, article: 'una', summary: 'una botella de agua', title: 'Botella de agua mineral', detail: 'Una botella de agua mineral de medio litro, transparente y con tapón azul.' },
       { id: 'queso', name: 'Queso', voice: 'El queso está en el estante superior, junto a los yogures.', level: 'Estante superior', category: 'lácteos', count: 1, article: 'un', summary: 'un trozo de queso', title: 'Queso curado', detail: 'Un trozo de queso curado de oveja, envuelto en papel encerado.' },
+      { id: 'jugo', name: 'Jugo de naranja', voice: 'El jugo de naranja está en el estante superior, a la izquierda.', level: 'Estante superior', category: 'bebidas', count: 1, article: 'un', summary: 'un jugo de naranja', title: 'Jugo de naranja', detail: 'Un envase de jugo de naranja sin azúcar añadido, con tapón verde y etiqueta en letra grande.' },
+      { id: 'mantequilla', name: 'Mantequilla', voice: 'La mantequilla está en el estante superior, delante.', level: 'Estante superior', category: 'lácteos', count: 1, article: 'una', summary: 'una mantequilla', title: 'Mantequilla', detail: 'Una barra de mantequilla envuelta en papel vegetal, con una marca táctil en la solapa.' },
     ];
     // leche
     const milk = new THREE.Group();
@@ -1286,6 +1416,35 @@ export function createHomeEnvironment() {
     cheese.rotation.y = 0.3;
     cheese.position.set(0.16, 1.27, 0.01);
     fridge.add(cheese);
+    // jugo de naranja (estante superior, izquierda)
+    const juice = new THREE.Group();
+    juice.position.set(-0.2, 0.81, 0.035);
+    const juiceBody = new THREE.Mesh(
+      new RoundedBoxGeometry(0.12, 0.26, 0.11, 2, 0.012),
+      new THREE.MeshStandardMaterial({ color: 0xe08a32, roughness: 0.42 })
+    );
+    juiceBody.position.y = 0.13;
+    juice.add(juiceBody);
+    const juiceCap = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.025, 10), new THREE.MeshStandardMaterial({ color: 0x4b7a3f, roughness: 0.5 }));
+    juiceCap.position.y = 0.272;
+    juice.add(juiceCap);
+    const juiceLabel = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.09, 0.09),
+      new THREE.MeshBasicMaterial({ map: makeTextTexture('JUGO', { bg: '#f0a13a', fg: '#4a2b0d', size: 36 }), toneMapped: false })
+    );
+    juiceLabel.position.set(0, 0.15, 0.057);
+    juice.add(juiceLabel);
+    fridge.add(juice);
+    // mantequilla (estante superior, centro)
+    const butter = new THREE.Group();
+    butter.position.set(0.03, 0.81, 0.04);
+    const butterBody = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.07, 0.1, 2, 0.01), new THREE.MeshStandardMaterial({ color: 0xf0d58b, roughness: 0.65 }));
+    butterBody.position.y = 0.035;
+    butter.add(butterBody);
+    const butterWrap = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.055), new THREE.MeshStandardMaterial({ color: 0xf6edcf, roughness: 0.8 }));
+    butterWrap.position.set(0, 0.038, 0.051);
+    butter.add(butterWrap);
+    fridge.add(butter);
     // yogures
     for (let i = 0; i < 2; i++) {
       const yogurt = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.035, 0.09, 12), whiteMat);
@@ -1305,6 +1464,8 @@ export function createHomeEnvironment() {
     products[1].object = apples;
     products[2].object = waterGroup;
     products[3].object = cheese;
+    products[4].object = juice;
+    products[5].object = butter;
 
     // Puerta con bisagra
     const doorPivot = new THREE.Group();

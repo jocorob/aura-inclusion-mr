@@ -119,6 +119,12 @@ class App {
     this.scan = null;
     this.scanSeq = 0;
     this.held = null;
+    this.intentGoal = null;
+    this.intentPromptOpen = false;
+    this.intentPrompted = false;
+    this.intentLastPromptAt = 0;
+    this.intentHudAt = 0;
+    this.homeSince = performance.now();
     this.heldStage = null;
     this.scanRay = new THREE.Raycaster();
     this.scanRay.camera = this.camera;
@@ -132,6 +138,9 @@ class App {
     this.viewPitch = 0;
     this.thirdPitch = 0.16;
     this.thirdDist = 2.4;
+    // Estado suavizado de la cámara POV: evita giros rígidos y mantiene
+    // el encuadre estable mientras el usuario arrastra o se desplaza.
+    this.povCam = { x: 0, y: 1.58, z: 0, yaw: 2.0, pitch: 0, ready: false };
 
     this.tmpVec = new THREE.Vector3();
     this.tmpVec2 = new THREE.Vector3();
@@ -325,6 +334,12 @@ class App {
       btn.addEventListener('click', () => this.ask(btn.dataset.ask));
     });
 
+    document.getElementById('intent-open')?.addEventListener('click', () => this.openIntentPrompt(true, true));
+    document.getElementById('intent-close')?.addEventListener('click', () => this.closeIntentPrompt());
+    document.querySelectorAll('#intent-options [data-intent]').forEach((btn) => {
+      btn.addEventListener('click', () => this.chooseIntent(btn.dataset.intent));
+    });
+
     document.getElementById('toggle-panels')?.addEventListener('click', () => this.togglePanels());
     document.getElementById('mobile-data')?.addEventListener('click', () => this.toggleMobilePanel('data'));
     document.getElementById('mobile-voice')?.addEventListener('click', () => this.toggleMobilePanel('voice'));
@@ -417,6 +432,18 @@ class App {
     if (e.repeat) return;
     const k = e.code;
 
+    if (k === 'KeyI') {
+      e.preventDefault();
+      if (this.intentPromptOpen) this.closeIntentPrompt();
+      else this.openIntentPrompt(true, true);
+      return;
+    }
+    if (k === 'Escape' && this.intentPromptOpen) {
+      e.preventDefault();
+      this.closeIntentPrompt();
+      return;
+    }
+
     // Sentarse / levantarse es contextual: solo junto al sofá.
     const nearSofa = this.getNearestInteractable('sofa');
     if (k === 'KeyS' && !this.seated && !this.held && nearSofa && this.speed < 0.55) {
@@ -434,6 +461,7 @@ class App {
 
     if (k === 'KeyF') {
       e.preventDefault();
+      if (this.intentPromptOpen) this.closeIntentPrompt();
       if (this.held) {
         this.returnHeld();
         return;
@@ -455,10 +483,11 @@ class App {
     }
     if (k === 'KeyE') {
       e.preventDefault();
+      if (this.intentPromptOpen) this.closeIntentPrompt();
       this.interact();
       return;
     }
-    if (this.fridgeOpen && ['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(k)) {
+    if (this.fridgeOpen && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].includes(k)) {
       const fridge = this.getNearestInteractable('fridge');
       const idx = Number(k.slice(-1)) - 1;
       if (fridge?.products?.[idx]) {
@@ -487,6 +516,12 @@ class App {
     if (k === 'KeyR') this.resetPosition();
     if (k === 'KeyM') this.togglePanels();
     if (k === 'Escape') {
+      if (this.intentGoal) {
+        this.clearIntent();
+        this.hud.toast('Plan cancelado');
+        this.speak('Plan cancelado. Puedes seguir explorando o pulsar I para elegir otro destino.', { priority: 1, log: false });
+        return;
+      }
       if (this.held) {
         this.returnHeld();
         return;
@@ -578,6 +613,8 @@ class App {
   setMode(mode) {
     if (mode === this.mode && this.loaded) return;
     if (this.held || this.scan) this.clearScan();
+    this.clearIntent();
+    this.closeIntentPrompt();
     if (mode === 'model' && this.seated) this.standUp();
     this.mode = mode;
     document.querySelectorAll('.tab').forEach((tab) => {
@@ -627,6 +664,8 @@ class App {
   setEnvironment(kind) {
     if (this.env.kind === kind) return;
     this.clearScan();
+    this.clearIntent();
+    this.closeIntentPrompt();
     this.env.setFridgeOpen?.(false);
     this.hud.hideContext();
     this.scene.remove(this.env.group);
@@ -650,6 +689,8 @@ class App {
     this.contextCurrentId = null;
     this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false };
     this.risk = 'clear';
+    this.intentPrompted = false;
+    this.homeSince = performance.now();
     this.camMode = 'third';
     this.hud.setCameraMode('third');
     const spawn = this.env.spawn;
@@ -685,6 +726,8 @@ class App {
 
   resetPosition() {
     this.clearScan();
+    this.clearIntent();
+    this.closeIntentPrompt();
     const spawn = this.env.spawn;
     const wasSeated = this.seated;
     this.seated = false;
@@ -727,6 +770,8 @@ class App {
     this.demo = !this.demo;
     document.getElementById('demo-btn')?.classList.toggle('active', this.demo);
     if (this.demo) {
+      this.closeIntentPrompt();
+      this.clearIntent();
       this.demoPath = DEMO_PATHS[this.env.kind] || DEMO_PATHS.corridor;
       this.demoIndex = 0;
       this.demoStuck = 0;
@@ -766,6 +811,181 @@ class App {
       }
     }
     return best;
+  }
+
+  /* ================= Diálogo proactivo de intenciones ================= */
+  openIntentPrompt(speak = true, force = false) {
+    if (this.env.kind !== 'home' || this.mode !== 'sim' || this.scan || this.held || this.seated) return;
+    if (this.intentPromptOpen) return;
+    const now = performance.now();
+    if (speak && !force && now - this.intentLastPromptAt < 6000) return;
+    this.cancelDemo();
+    this.intentPromptOpen = true;
+    this.intentPrompted = true;
+    this.intentLastPromptAt = now;
+    this.contextTimer = 1;
+    document.body.classList.remove('show-data', 'show-voice');
+    this.hud.showIntentPrompt();
+    if (speak) {
+      this.speak('¿Qué te gustaría hacer? ¿Quieres ir al baño, a la cocina o tomar algo en la nevera?', { priority: 2, log: true });
+    }
+  }
+
+  closeIntentPrompt() {
+    if (!this.intentPromptOpen) return;
+    this.intentPromptOpen = false;
+    this.hud.hideIntentPrompt();
+    this.contextTimer = 1;
+  }
+
+  chooseIntent(id) {
+    this.closeIntentPrompt();
+    if (id === 'explore') {
+      this.clearIntent();
+      this.speak('Perfecto. Sigue explorando. Cuando quieras retomar un destino, pulsa I.', { priority: 1, log: true });
+      return;
+    }
+    const meta = {
+      bath: { label: 'Baño', spoken: 'al baño' },
+      kitchen: { label: 'Cocina', spoken: 'a la cocina' },
+      fridge: { label: 'Nevera', spoken: 'a la nevera' },
+    }[id];
+    if (!meta) return;
+    const route = this.buildIntentRoute(id);
+    if (!route.length) return;
+    this.clearIntent();
+    this.intentGoal = {
+      id,
+      label: meta.label,
+      spoken: meta.spoken,
+      route,
+      index: 0,
+      arrived: false,
+      arrivedAt: 0,
+    };
+    const finalPoint = route[route.length - 1];
+    this.intentHudAt = 0;
+    this.hud.setGoal(meta.label, fmtDist(this.distanceTo(finalPoint)));
+    const first = route[0];
+    const direction = this.intentDirection(first);
+    let speech = `Vamos ${meta.spoken}. El primer tramo queda ${direction}, a ${fmtDist(this.distanceTo(first))}.`;
+    if (id === 'fridge') speech += ' Al llegar, pulsa E para abrirla y escanear los productos.';
+    else speech += ' Te aviso al llegar.';
+    this.speak(speech, { priority: 2, log: true });
+    this.hud.toast(`Objetivo: ${meta.label} · sigue las indicaciones de AURA`, 4200);
+  }
+
+  buildIntentRoute(id) {
+    const route = [];
+    const front = this.player.z > -1.05;
+    const final = id === 'bath'
+      ? { x: 4.15, z: -2.95, label: 'la puerta del baño' }
+      : id === 'kitchen'
+        ? { x: 2.2, z: 2.75, label: 'la cocina' }
+        : { x: 4.45, z: -0.45, label: 'la nevera' };
+
+    if (id === 'bath') {
+      if (this.player.x > 3.35 && this.player.z < -1.2) return [final];
+      if (front) {
+        if (this.player.x > 3.3) {
+          route.push({ x: 4.5, z: 0.8, label: 'el lado este de la barra' });
+        } else {
+          if (this.player.z > 1.2) {
+            route.push({ x: 0.9, z: 3.0, label: 'el borde sur de la sala' });
+          }
+          if (this.distanceTo({ x: 0.9, z: -0.15 }) > 0.8) {
+            route.push({ x: 0.9, z: -0.15, label: 'el pasillo de la sala' });
+          }
+        }
+        route.push({ x: 2.0, z: -0.55, label: 'el paso al pasillo' });
+      }
+      if (!front || this.player.x < 2.0 || this.player.z > -2.35) {
+        route.push({ x: 2.6, z: -2.95, label: 'el pasillo' });
+      }
+    } else if (id === 'kitchen') {
+      if (!front) {
+        route.push({ x: 2.0, z: -0.55, label: 'el paso a la cocina' });
+        route.push({ x: 4.5, z: 0.8, label: 'el lado este de la barra' });
+        route.push({ x: 4.5, z: 2.9, label: 'la zona de la mesa' });
+      } else if (this.player.x > 3.35) {
+        route.push({ x: 4.5, z: 2.9, label: 'la zona de la mesa' });
+      }
+    } else if (id === 'fridge') {
+      if (!front) {
+        route.push({ x: 2.0, z: -0.55, label: 'el paso a la cocina' });
+        route.push({ x: 4.5, z: 0.8, label: 'el lado este de la barra' });
+      } else if (this.player.z > 0.85 || this.player.x < 3.2) {
+        route.push({ x: 4.5, z: 2.9, label: 'la zona de la mesa' });
+        route.push({ x: 4.5, z: 0.8, label: 'el lado este de la barra' });
+      }
+    }
+
+    route.push(final);
+    while (route.length > 1 && this.distanceTo(route[0]) < 0.8) route.shift();
+    return route;
+  }
+
+  intentDirection(point) {
+    const delta = wrapAngle(Math.atan2(point.x - this.player.x, point.z - this.player.z) - this.viewYaw);
+    if (Math.abs(delta) <= 0.5) return 'al frente';
+    if (Math.abs(delta) >= 2.45) return 'detrás de ti';
+    return delta > 0 ? 'a tu derecha' : 'a tu izquierda';
+  }
+
+  intentArrivalText(goal) {
+    if (goal.id === 'bath') return 'Ya estás en el baño. El lavabo queda a un lado y la ducha al fondo.';
+    if (goal.id === 'kitchen') return 'Ya estás en la cocina. La barra queda al frente y la nevera a la derecha.';
+    return 'Ya estás frente a la nevera. Pulsa E para abrirla y escanear lo que hay dentro.';
+  }
+
+  clearIntent() {
+    if (!this.intentGoal) return;
+    this.intentGoal = null;
+    this.hud.clearGoal();
+  }
+
+  updateIntent() {
+    if (this.env.kind !== 'home' || this.mode !== 'sim') return;
+    const now = performance.now();
+    if (!this.intentPrompted && !this.intentPromptOpen && !this.intentGoal
+      && this.hasFirstInput && !this.demo && !this.seated && !this.scan && !this.held
+      && this.speed < 0.16 && now - this.homeSince > 8500
+      && now - this.tutor.lastAt > 6000 && !this.voice.speaking) {
+      this.openIntentPrompt(true);
+      return;
+    }
+    const goal = this.intentGoal;
+    if (!goal) return;
+    if (goal.arrived) {
+      if (now - goal.arrivedAt > 8000) this.clearIntent();
+      return;
+    }
+
+    const finalPoint = goal.route[goal.route.length - 1];
+    const finalDist = this.distanceTo(finalPoint);
+    if (now - this.intentHudAt > 180) {
+      this.intentHudAt = now;
+      this.hud.setGoal(goal.label, fmtDist(finalDist));
+    }
+
+    const waypoint = goal.route[goal.index];
+    if (!waypoint) return;
+    const waypointDist = this.distanceTo(waypoint);
+    if (waypointDist > 0.82) return;
+
+    if (goal.index >= goal.route.length - 1) {
+      goal.arrived = true;
+      goal.arrivedAt = now;
+      this.hud.setGoal(goal.label, 'aquí');
+      this.speak(this.intentArrivalText(goal), { priority: 2, log: true });
+      return;
+    }
+
+    goal.index += 1;
+    const next = goal.route[goal.index];
+    if (!this.voice.speaking) {
+      this.speak(`Bien. Ahora ${next.label} queda ${this.intentDirection(next)}, a ${fmtDist(this.distanceTo(next))}.`, { priority: 1, log: true });
+    }
   }
 
   joinEs(items) {
@@ -840,6 +1060,32 @@ class App {
     return result;
   }
 
+  collectScanSweep() {
+    const scan = this.scan;
+    if (!scan) return;
+    const pitchSteps = 10;
+    const yawSteps = 3;
+    const savedPitch = this.viewPitch;
+    const savedYaw = this.viewYaw;
+    const range = scan.yawRange || 0;
+    for (let yi = 0; yi < yawSteps; yi += 1) {
+      const yawFactor = yawSteps === 1 ? 0 : (yi / (yawSteps - 1)) * 2 - 1;
+      this.viewYaw = scan.baseYaw + yawFactor * range;
+      for (let pi = 0; pi < pitchSteps; pi += 1) {
+        this.viewPitch = lerp(scan.pitchFrom, scan.pitchTo, pi / (pitchSteps - 1));
+        this.updateCamera(1 / 60, true);
+        for (const candidate of this.scanCandidates(scan.target)) {
+          const key = this.scanItemKey(candidate.item);
+          const prev = scan.found.get(key);
+          if (!prev || candidate.dist < prev.dist) scan.found.set(key, candidate);
+        }
+      }
+    }
+    this.viewYaw = savedYaw;
+    this.viewPitch = savedPitch;
+    this.updateCamera(1 / 60, true);
+  }
+
   isVisibleFromCamera(candidate) {
     const camPos = this.camera.position;
     const radius = Math.max(0.02, candidate.radius || 0.02);
@@ -874,6 +1120,7 @@ class App {
 
   startScan(target) {
     if (!target) return;
+    if (this.intentPromptOpen) this.closeIntentPrompt();
     this.stopIntro();
     this.cancelDemo();
     if (this.held) this.returnHeld({ silent: true });
@@ -893,12 +1140,13 @@ class App {
     }
     this.camMode = 'pov';
     this.hud.setCameraMode('pov');
-    const config = target.type === 'shelf'
+    const config = target.scanPitch || (target.type === 'shelf'
       ? { from: 0.2, to: -0.62, duration: 2100 }
       : target.type === 'table'
         ? { from: 0.08, to: -0.72, duration: 1500 }
-        : { from: 0.12, to: -0.78, duration: 2000 };
+        : { from: 0.12, to: -0.78, duration: 2000 });
     this.viewPitch = config.from;
+    const yawRange = target.type === 'table' ? 0.38 : target.type === 'shelf' ? 0.24 : 0.2;
     this.scan = {
       seq: ++this.scanSeq,
       target,
@@ -912,6 +1160,8 @@ class App {
       pitchFrom: config.from,
       pitchTo: config.to,
       duration: config.duration,
+      baseYaw: this.viewYaw,
+      yawRange,
     };
     this.contextMuted = null;
     this.contextCurrentId = null;
@@ -929,6 +1179,9 @@ class App {
     const t = clamp((now - scan.startedAt) / scan.duration, 0, 1);
     const eased = t * t * (3 - 2 * t);
     this.viewPitch = lerp(scan.pitchFrom, scan.pitchTo, eased);
+    // Barrido horizontal suave: centro → derecha → centro → izquierda → centro.
+    // Así una superficie ancha entra completa en el frustum también en móvil.
+    this.viewYaw = scan.baseYaw + Math.sin(eased * Math.PI * 2) * (scan.yawRange || 0);
     this.camMode = 'pov';
     this.updateCamera(1 / 60, true);
     if (now - scan.lastSample > 120) {
@@ -945,10 +1198,16 @@ class App {
   finishScan() {
     const scan = this.scan;
     if (!scan || scan.done) return;
+    // Con pocos fps el muestreo de 120 ms puede saltarse los extremos del
+    // barrido. Reconstruimos el barrido con pasos fijos para contar todos
+    // los objetos que sí son visibles desde la cámara.
+    this.collectScanSweep();
     scan.items = [...scan.found.values()].sort((a, b) => a.dist - b.dist);
     scan.done = true;
     scan.empty = scan.items.length === 0;
-    this.viewPitch = scan.target.type === 'fridge' ? -0.6 : scan.target.type === 'table' ? -0.45 : -0.3;
+    this.viewYaw = scan.baseYaw;
+    this.viewPitch = scan.target.finalPitch
+      ?? (scan.target.type === 'fridge' ? -0.6 : scan.target.type === 'table' ? -0.45 : -0.3);
     this.updateCamera(1 / 60, true);
     this.contextMuted = null;
     this.contextTimer = 1;
@@ -1192,7 +1451,7 @@ class App {
     }
 
     const items = scan.items.map((entry) => entry.item);
-    const actions = items.slice(0, 3).map((item, index) => ({
+    const actions = items.slice(0, 6).map((item, index) => ({
       label: `Acercar ${lowerFirst(item.name)}`,
       hint: index === 0 ? 'F' : undefined,
       primary: index === 0,
@@ -1213,6 +1472,7 @@ class App {
 
   sitOnSofa(sofa) {
     if (!sofa?.seats?.length) return;
+    if (this.intentPromptOpen) this.closeIntentPrompt();
     this.clearScan();
     this.stopIntro();
     let seat = sofa.seats[0];
@@ -1284,6 +1544,7 @@ class App {
   }
 
   toggleFridge(force) {
+    if (this.intentPromptOpen) this.closeIntentPrompt();
     this.stopIntro();
     const fridge = this.getNearestInteractable('fridge') || this.env.interactables?.find((i) => i.type === 'fridge');
     if (!fridge) return;
@@ -1318,6 +1579,7 @@ class App {
   }
 
   selectFridgeProduct(id) {
+    if (this.intentPromptOpen) this.closeIntentPrompt();
     this.stopIntro();
     const fridge = this.env.interactables?.find((i) => i.type === 'fridge');
     const product = fridge?.products?.find((p) => p.id === id);
@@ -1331,6 +1593,7 @@ class App {
   }
 
   interact() {
+    if (this.intentPromptOpen) this.closeIntentPrompt();
     this.stopIntro();
     if (this.held) {
       this.returnHeld();
@@ -1361,6 +1624,13 @@ class App {
         this.renderHeldContext();
         return;
       }
+    }
+
+    // Mientras el usuario elige un plan, la tarjeta de intenciones tiene
+    // prioridad y no se muestran tarjetas contextuales superpuestas.
+    if (this.intentPromptOpen) {
+      this.hud.hideContext();
+      return;
     }
 
     this.contextTimer += dt;
@@ -1515,6 +1785,7 @@ class App {
 
     this.updateZone(dt);
     this.updateInteractions(dt);
+    this.updateIntent();
     this.updateRisk(dt, sensor);
     this.updateBatteryAlerts();
     this.telemetry.update(dt, {
@@ -1562,7 +1833,10 @@ class App {
     const input = this.getMoveInput();
     const yaw = this.viewYaw;
     const moving = Math.hypot(input.x, input.z) > 0.01;
-    if (moving) this.stopIntro();
+    if (moving) {
+      this.stopIntro();
+      if (this.intentPromptOpen) this.closeIntentPrompt();
+    }
 
     if (moving) {
       const len = Math.hypot(input.x, input.z);
@@ -1644,9 +1918,31 @@ class App {
       const p = anchor.getWorldPosition(this.tmpVec2);
       const fx = Math.sin(this.viewYaw);
       const fz = Math.cos(this.viewYaw);
-      this.camera.position.set(p.x + fx * 0.03, p.y, p.z + fz * 0.03);
+      const targetX = p.x + fx * 0.03;
+      const targetY = p.y;
+      const targetZ = p.z + fz * 0.03;
+      const cam = this.povCam;
+      if (snap || !cam.ready) {
+        cam.x = targetX;
+        cam.y = targetY;
+        cam.z = targetZ;
+        cam.yaw = this.viewYaw;
+        cam.pitch = this.viewPitch;
+        cam.ready = true;
+      } else {
+        const posAlpha = 1 - Math.exp(-20 * dt);
+        const yawAlpha = 1 - Math.exp(-10 * dt);
+        const pitchAlpha = 1 - Math.exp(-12 * dt);
+        cam.x = THREE.MathUtils.lerp(cam.x, targetX, posAlpha);
+        cam.y = THREE.MathUtils.lerp(cam.y, targetY, posAlpha);
+        cam.z = THREE.MathUtils.lerp(cam.z, targetZ, posAlpha);
+        const yawDelta = wrapAngle(this.viewYaw - cam.yaw);
+        cam.yaw = wrapAngle(cam.yaw + THREE.MathUtils.lerp(0, yawDelta, yawAlpha));
+        cam.pitch = THREE.MathUtils.lerp(cam.pitch, this.viewPitch, pitchAlpha);
+      }
+      this.camera.position.set(cam.x, cam.y, cam.z);
       this.camera.rotation.order = 'YXZ';
-      this.camera.rotation.set(this.viewPitch, this.viewYaw + Math.PI, 0);
+      this.camera.rotation.set(cam.pitch, cam.yaw + Math.PI, 0);
     } else {
       const target = new THREE.Vector3(this.player.x, this.seated ? 0.92 : 1.24, this.player.z);
       if (this.env.kind === 'home') {
@@ -1702,10 +1998,68 @@ class App {
     if (!label || label === 'Obstáculo' || label === 'Obstáculo bajo') return 'un obstáculo';
     if (label === 'Pared') return 'una pared';
     const l = lowerFirst(label);
-    if (/^(mesa|silla|estantería|nevera|lámpara|planta|ducha|isla|barra|encimera|consola|lavabo|cama|alfombra|puerta|ventana|radio|taza|botella)/.test(l)) {
+    if (/^(mesa|silla|estantería|nevera|lámpara|planta|ducha|isla|barra|encimera|consola|lavabo|cama|alfombra|puerta|ventana|radio|taza|botella|bañera|toalla)/.test(l)) {
       return `una ${l}`;
     }
     return `un ${l}`;
+  }
+
+  definiteObstacle(label) {
+    if (!label || label === 'Obstáculo' || label === 'Obstáculo bajo') return 'el obstáculo';
+    if (label === 'Pared') return 'la pared';
+    const l = lowerFirst(label);
+    if (/^(mesa|silla|estantería|nevera|lámpara|planta|ducha|isla|barra|encimera|consola|lavabo|cama|alfombra|puerta|ventana|radio|taza|botella|bañera|toalla)/.test(l)) {
+      return `la ${l}`;
+    }
+    return `el ${l}`;
+  }
+
+  pluralObstacle(label) {
+    const l = lowerFirst(label || 'objeto');
+    const parts = l.split(' ');
+    const head = parts[0];
+    if (/z$/.test(head)) parts[0] = `${head.slice(0, -1)}ces`;
+    else if (/[aeiouáéíóú]$/.test(head)) parts[0] = `${head}s`;
+    else parts[0] = `${head}es`;
+    return parts.join(' ');
+  }
+
+  riskSideDetail(side, hazards, lowGroups) {
+    const hazard = hazards.get(side);
+    if (!hazard) return null;
+    const lows = (lowGroups[side] || []).slice().sort((a, b) => a.d - b.d);
+    const nearestLow = lows[0];
+    const useWall = !hazard.low && (!nearestLow || hazard.d <= nearestLow.d + 0.05);
+    const entries = useWall || !lows.length ? [{ label: hazard.label, d: hazard.d }] : lows;
+    const unique = new Map();
+    for (const entry of entries) {
+      if (!entry.label) continue;
+      const prev = unique.get(entry.label);
+      if (!prev) unique.set(entry.label, { label: entry.label, count: 1, d: entry.d });
+      else prev.count += 1;
+    }
+    const labels = [...unique.values()].sort((a, b) => a.d - b.d);
+    if (!labels.length) labels.push({ label: hazard.label, count: 1, d: hazard.d });
+    return { hazard, labels, d: Math.min(hazard.d, ...labels.map((item) => item.d)) };
+  }
+
+  riskSideSentence(side, hazards, lowGroups) {
+    const detail = this.riskSideDetail(side, hazards, lowGroups);
+    if (!detail) return '';
+    const visible = detail.labels.slice(0, 3);
+    const list = this.joinEs(visible.map((entry) =>
+      entry.count > 1
+        ? `${numEs(entry.count)} ${this.pluralObstacle(entry.label)}`
+        : this.presentObstacle(entry.label)
+    ));
+    const extra = detail.labels.length > visible.length ? ' y algún objeto más' : '';
+    const distance = `, a ${fmtDist(detail.d)}`;
+    if (side === 'front') return `Al frente tienes ${list}${extra}${distance}.`;
+    const sideWord = side === 'left' ? 'izquierda' : 'derecha';
+    if (visible.length === 1 && visible[0].count === 1 && !extra) {
+      return `A tu ${sideWord} está ${this.definiteObstacle(visible[0].label)}${distance}.`;
+    }
+    return `A tu ${sideWord} tienes ${list}${extra}${distance}.`;
   }
 
   updateRisk(dt, sensor) {
@@ -1719,6 +2073,7 @@ class App {
     // Durante un escaneo o una inspección el usuario está quieto y la voz
     // principal es la de la cámara; no se añaden avisos de proximidad.
     if ((this.scan || this.held) && this.speed < 0.2) return;
+    if (this.intentPromptOpen) return;
 
     const scan = this.lidar.scan;
     const now = performance.now();
@@ -1737,6 +2092,7 @@ class App {
     // Obstáculos bajos: la cámara de profundidad los localiza y el ángulo
     // relativo permite agruparlos por lado sin disparar un aviso por paso.
     const lowBySide = {};
+    const lowGroups = { front: [], left: [], right: [] };
     for (const obs of this.env.obstacles) {
       if (!obs.low) continue;
       box.setFromObject(obs.mesh);
@@ -1753,9 +2109,9 @@ class App {
         : rel > 0.55 && rel <= 1.45 ? 'right'
           : rel < -0.55 && rel >= -1.45 ? 'left' : null;
       if (!side) continue;
-      if (!lowBySide[side] || d < lowBySide[side].d) {
-        lowBySide[side] = { d, label: obs.label, rel };
-      }
+      const entry = { d, label: obs.label, rel };
+      lowGroups[side].push(entry);
+      if (!lowBySide[side] || d < lowBySide[side].d) lowBySide[side] = entry;
     }
 
     if (lowBySide.front) addHazard('front', lowBySide.front.d, lowBySide.front.label, true);
@@ -1783,12 +2139,12 @@ class App {
     this.risk = level;
 
     const sides = ['front', 'left', 'right'].filter((side) => hazards.has(side));
-    const signature = `${level}|${sides.join('|')}`;
+    const signature = `${level}|${sides.map((side) => hazards.get(side)?.label || '').join('|')}`;
     const tutor = this.tutor;
     const critical = level === 'critical';
 
     if (level === 'clear') {
-      if (tutor.warned && now - tutor.lastAt > 1200 && now - tutor.lastClearAt > 7000) {
+      if (tutor.warned && now - tutor.lastAt > 1200 && now - tutor.lastClearAt > 9000) {
         tutor.warned = false;
         tutor.lastClearAt = now;
         tutor.lastAt = now;
@@ -1808,14 +2164,12 @@ class App {
     if (rightBlocked && !leftBlocked) turn = 'left';
     const turnWord = turn === 'right' ? 'derecha' : 'izquierda';
 
-    const sidePhrase = { front: 'frente a ti', left: 'a tu izquierda', right: 'a tu derecha' };
-    let obstacleSentence = '';
-    if (sides.length > 1) {
-      obstacleSentence = `Hay varios objetos ${this.joinEs(sides.map((side) => sidePhrase[side]))}.`;
-    } else if (sides.length === 1) {
-      const hazard = hazards.get(sides[0]);
-      obstacleSentence = `Hay ${this.presentObstacle(hazard.label)} ${sidePhrase[hazard.side]}, a ${fmtDist(hazard.d)}.`;
-    }
+    // Describimos los elementos concretos que hay a cada lado; nunca una
+    // frase genérica sin nombres ni referencias espaciales concretas.
+    const obstacleSentence = sides
+      .map((side) => this.riskSideSentence(side, hazards, lowGroups))
+      .filter(Boolean)
+      .join(' ');
 
     let recommendation = '';
     const sideOnly = !isFinite(frontD) && sides.length > 0;
@@ -1861,7 +2215,7 @@ class App {
 
     let shouldSpeak = false;
     if ((newScenario || changed) && now - tutor.lastAt > minGap) shouldSpeak = true;
-    else if (movingToward && now - tutor.lastAt > (critical ? 6000 : 11000)) shouldSpeak = true;
+    else if (movingToward && now - tutor.lastAt > (critical ? 7000 : 15000)) shouldSpeak = true;
     if (!shouldSpeak) return;
 
     tutor.lastAt = now;

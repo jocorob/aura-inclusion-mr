@@ -65,10 +65,11 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 
 El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y mobiliario modelados a escala. Incluye:
 
-- **Sala**: sofá de dos plazas, mesa de centro, mueble de TV, planta y dos estanterías. La lámpara de pie se ha retirado del recorrido del avatar y ahora vive junto al mueble de TV. Al acercarse a una estantería, AURA **no recita de memoria**: invita a pulsar `E` y solo describe lo que la cámara POV reconoce en ese momento.
-- **Cocina**: barra con taburetes y lámparas colgantes, encimera, mesa de desayuno y **nevera interactiva**. Con `E` se abre la puerta, se enciende la luz interior y comienza un barrido de cámara en primera persona. El resumen agrupa cantidades (*«Con la cámara veo tres manzanas, dos productos lácteos y una botella de agua»*); `1`–`4` seleccionan un producto y `F` lo acerca al arnés para leer su ficha.
+- **Sala**: sofá de dos plazas, mesa de centro, mueble de TV, planta y dos estanterías. La lámpara de pie se ha retirado del recorrido del avatar y ahora vive junto al mueble de TV. La mesa de centro tiene un mando, una revista y dos tazas que se escanean en POV y se pueden acercar con `F`. Al acercarse a una estantería, AURA **no recita de memoria**: invita a pulsar `E` y solo describe lo que la cámara reconoce en ese momento.
+- **Cocina**: barra con taburetes y lámparas colgantes, encimera, mesa de desayuno y **nevera interactiva**. Sobre la barra hay un frutero, tres platos, tres vasos y una tabla de picar; todos se reconocen con la cámara POV. La nevera contiene leche, manzanas, agua, queso, jugo de naranja y mantequilla. Con `E` se abre la puerta, se enciende la luz interior y comienza un barrido en primera persona. El resumen agrupa cantidades (*«Con la cámara veo tres manzanas, tres productos lácteos y dos bebidas»*); `1`–`6` seleccionan un producto y `F` lo acerca al arnés para leer su ficha.
 - **Mesa de desayuno**: libro de recetas, dos tazas y un frutero con tres manzanas. También se escanea en POV y sus objetos se pueden acercar con `F`.
-- **Escaneo activo POV**: al interactuar con estanterías, nevera o mesa, la cámara pasa a primera persona y hace un barrido vertical (con giro suave) antes de responder. Solo entran en el resumen los objetos que han pasado por el frustum y no estaban ocultos; las cantidades se agrupan por categorías para no saturar: *«Con la cámara veo seis libros, tres objetos decorativos, dos aparatos electrónicos y una cesta de mimbre»*.
+- **Diálogo de intenciones**: tras el primer gesto de la persona usuaria, AURA pregunta de forma proactiva *«¿Qué te gustaría hacer? ¿Quieres ir al baño, a la cocina o tomar algo en la nevera?»* y muestra cuatro opciones táctiles. El plan elige una ruta con puntos de referencia, indica la dirección y la distancia del primer tramo, avisa al llegar y deja un objetivo visible en la etiqueta de zona. Se puede reabrir con `I`.
+- **Escaneo activo POV**: al interactuar con estanterías, nevera o mesa, la cámara pasa a primera persona y hace un barrido vertical con un paneo horizontal suave antes de responder. Solo entran en el resumen los objetos que han pasado por el frustum y no estaban ocultos; las cantidades se agrupan por categorías para no saturar: *«Con la cámara veo seis libros, tres objetos decorativos, dos aparatos electrónicos y una cesta de mimbre»*.
 - **Acercar objetos**: con `F` (o tocando la acción «Acercar») el objeto sale de la estantería, la nevera o la mesa, se coloca sobre un fondo de inspección oscuro delante de la cámara y AURA lee su título y descripción detallada. `F`, `E` o `Esc` lo devuelven a su sitio.
 - **Pasillos y accesos**: el vano sala-cocina, la puerta del baño y la entrada principal tienen **1,8 m** de luz; el resto de circulaciones mantiene al menos 1,8 m para que el avatar y el arnés pasen sin rozar.
 - **Sentarse**: junto al sofá, `S` sienta al avatar; la cámara pasa a la altura de los ojos sentado, el arnés y la caja AURA bajan con el cuerpo, las piernas se flexionan y el LiDAR sigue activo. `S`, `E` o `Esc` vuelven a poner de pie.
@@ -76,8 +77,8 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 
 ### 4. Interfaz de voz local (Edge AI)
 
-- **Tutor de movilidad sin fatiga auditiva**: nada de «¡Alto!» ni un aviso por cada paso. Cuando hay varios obstáculos se agrupan en una sola frase natural —*«Hay varios objetos frente a ti y a tu izquierda. Gira ligeramente a la derecha para seguir avanzando.»*— y se añade una recomendación de giro o desplazamiento.
-- **Silencio inteligente**: un mismo escenario no se repite mientras el usuario avanza en una dirección segura; solo se vuelve a hablar si cambia el riesgo, si el usuario sigue acercándose tras un tiempo prudencial o si el camino queda despejado (un único mensaje de confirmación).
+- **Tutor de movilidad sin fatiga auditiva**: nada de «¡Alto!» ni un aviso por cada paso. AURA nombra los elementos concretos y su lado —*«Al frente tienes una mesa de centro, a 64 centímetros. A tu derecha está el sofá, a 1,5 metros. Gira ligeramente a la izquierda para seguir avanzando.»*— y añade una recomendación de giro o desplazamiento.
+- **Silencio inteligente**: un mismo escenario no se repite mientras el usuario avanza en una dirección segura; solo se vuelve a hablar si cambia el riesgo, si el usuario sigue acercándose tras un espacio de 7 s en riesgo crítico o 15 s en riesgo moderado, o si el camino queda despejado (un único mensaje de confirmación, con 9 s de margen). El diálogo de intenciones no interrumpe un aviso de riesgo y se pospone mientras AURA está hablando.
 - Durante un escaneo o una inspección con el objeto acercado, el tutor baja la voz y deja el protagonismo al reconocimiento de la cámara.
 - Subtítulos sincronizados en el panel **Voz local**, cola de mensajes con prioridad y repetición controlada para no saturar.
 - Sonar de proximidad opcional (Web Audio) para una pista no verbal de cercanía.
@@ -109,9 +110,10 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 | Escanear con la cámara POV (nevera, estantería, mesa) | `E` |
 | Acercar / devolver el objeto escaneado | `F` |
 | Sentarse / levantarse del sofá | `S` (junto al sofá) |
-| Elegir producto de la nevera | `1` `2` `3` `4` |
+| Elegir producto de la nevera | `1` `2` `3` `4` `5` `6` |
+| Abrir el plan de intenciones | `I` |
 | Cambiar de entorno | Botones **Casa / Corredor / Laberinto** del dock |
-| Cerrar fichas, tarjetas y paneles | `Esc` |
+| Cerrar fichas, tarjetas, plan y paneles | `Esc` |
 | Mirar alrededor | Arrastrar con el ratón |
 | Zoom | Rueda del ratón |
 | Inspeccionar el dispositivo | Pestaña **Modelo 3D** → arrastrar y pulsar los puntos |
@@ -121,6 +123,7 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 - D-pad en la barra inferior para caminar.
 - Botones de cámara (3ª persona / POV AURA), entorno (Casa / Corredor / Laberinto), recorrido automático y reinicio.
 - La tarjeta contextual ofrece «Escanear con la cámara» y «Acercar …» como botones táctiles; no hace falta teclado.
+- La tarjeta de intenciones permite elegir baño, cocina, nevera o seguir explorando; el objetivo y su distancia quedan visibles junto a la zona.
 - Botones de telemetría y voz en la barra superior.
 - Arrastrar sobre la escena para mirar.
 
