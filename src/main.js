@@ -52,6 +52,24 @@ const fmtDist = (d) => {
 
 const lowerFirst = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
 
+const NUM_ES = ['cero', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez', 'once', 'doce'];
+const numEs = (n) => NUM_ES[n] ?? String(n);
+
+const CATEGORY_WORDS = {
+  libros: ['libro', 'libros'],
+  'decoración': ['objeto decorativo', 'objetos decorativos'],
+  'electrónica': ['aparato electrónico', 'aparatos electrónicos'],
+  hogar: ['objeto de casa', 'objetos de casa'],
+  menaje: ['pieza de menaje', 'piezas de menaje'],
+  'lácteos': ['producto lácteo', 'productos lácteos'],
+  fruta: ['pieza de fruta', 'piezas de fruta'],
+  bebidas: ['bebida', 'bebidas'],
+  alimentos: ['alimento', 'alimentos'],
+};
+
+const articleFor = (word) => (/a$/.test(word) ? 'una' : 'un');
+const pluralFor = (count, word) => (count === 1 ? `${articleFor(word)} ${word}` : `${numEs(count)} ${word}`);
+
 class App {
   constructor() {
     this.canvas = document.getElementById('scene-canvas');
@@ -71,12 +89,11 @@ class App {
     this.loaded = false;
     this.greeted = false;
     this.zone = '';
-    this.lastAlertAt = 0;
     this.lastZoneAt = 0;
-    this.lastSideAlert = 0;
     this.lastBatteryAlert = 0;
     this.risk = 'clear';
     this.riskTimer = 0;
+    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false };
     this.sonarTimer = 0;
     this.fpsFrames = 0;
     this.fpsTime = 0;
@@ -99,8 +116,14 @@ class App {
     this.contextMuted = null;
     this.contextCurrentId = null;
     this.contextTimer = 0;
-    this.shelfSpoken = new Set();
-    this.lastShelfAt = 0;
+    this.scan = null;
+    this.scanSeq = 0;
+    this.held = null;
+    this.heldStage = null;
+    this.scanRay = new THREE.Raycaster();
+    this.scanRay.camera = this.camera;
+    this.scanBox = new THREE.Box3();
+    this.scanSphere = new THREE.Sphere();
 
     this.player = { x: -3.3, z: 2.2, yaw: 2.0 };
     this.input = { x: 0, z: 0, run: false };
@@ -384,6 +407,7 @@ class App {
     if (!this.greeted) {
       this.greeted = true;
       setTimeout(() => {
+        if (this.held || this.scan) return;
         this.speak('Sistema AURA en línea. Arnés ajustado y mapa espacial listo. Puedes comenzar a caminar.', { priority: 2, log: false });
       }, 420);
     }
@@ -395,7 +419,7 @@ class App {
 
     // Sentarse / levantarse es contextual: solo junto al sofá.
     const nearSofa = this.getNearestInteractable('sofa');
-    if (k === 'KeyS' && !this.seated && nearSofa && this.speed < 0.55) {
+    if (k === 'KeyS' && !this.seated && !this.held && nearSofa && this.speed < 0.55) {
       e.preventDefault();
       this.sitOnSofa(nearSofa);
       return;
@@ -408,6 +432,27 @@ class App {
       }
     }
 
+    if (k === 'KeyF') {
+      e.preventDefault();
+      if (this.held) {
+        this.returnHeld();
+        return;
+      }
+      const preferred = this.getPreferredScanItem();
+      if (preferred) {
+        this.takeHeldItem(preferred);
+        return;
+      }
+      const target = (this.env.interactables || []).find((item) =>
+        (item.type === 'shelf' || item.type === 'table' || item.type === 'fridge') &&
+        this.distanceTo(item.point) <= item.radius
+      );
+      if (target) {
+        this.hud.toast('Primero escanea con E y elige un objeto');
+        this.speak('Primero pulsa E para escanear la superficie; después podrás acercar un objeto con F.', { priority: 1, log: false });
+      }
+      return;
+    }
     if (k === 'KeyE') {
       e.preventDefault();
       this.interact();
@@ -442,8 +487,20 @@ class App {
     if (k === 'KeyR') this.resetPosition();
     if (k === 'KeyM') this.togglePanels();
     if (k === 'Escape') {
+      if (this.held) {
+        this.returnHeld();
+        return;
+      }
+      if (this.fridgeOpen) {
+        this.toggleFridge(false);
+        return;
+      }
+      if (this.scan) {
+        this.scan = null;
+        this.hud.hideScan();
+      }
       this.hud.hideSpec();
-      if (!this.fridgeOpen) this.hud.hideContext();
+      this.hud.hideContext();
       document.body.classList.remove('panels-hidden', 'show-data', 'show-voice');
     }
   }
@@ -496,6 +553,11 @@ class App {
   setCameraMode(cam) {
     const wasIntro = this.intro.active;
     this.stopIntro();
+    if (this.scan && cam !== 'pov') {
+      this.scan = null;
+      this.hud.hideScan();
+    }
+    if (this.held && cam !== 'pov') this.returnHeld({ silent: true });
     this.camMode = cam;
     this.hud.setCameraMode(cam);
     if (cam === 'pov') {
@@ -515,6 +577,7 @@ class App {
   /* ================= Modo ================= */
   setMode(mode) {
     if (mode === this.mode && this.loaded) return;
+    if (this.held || this.scan) this.clearScan();
     if (mode === 'model' && this.seated) this.standUp();
     this.mode = mode;
     document.querySelectorAll('.tab').forEach((tab) => {
@@ -563,6 +626,7 @@ class App {
 
   setEnvironment(kind) {
     if (this.env.kind === kind) return;
+    this.clearScan();
     this.env.setFridgeOpen?.(false);
     this.hud.hideContext();
     this.scene.remove(this.env.group);
@@ -584,7 +648,8 @@ class App {
     this.rig.root.visible = true;
     this.contextMuted = null;
     this.contextCurrentId = null;
-    this.shelfSpoken.clear();
+    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false };
+    this.risk = 'clear';
     this.camMode = 'third';
     this.hud.setCameraMode('third');
     const spawn = this.env.spawn;
@@ -619,6 +684,7 @@ class App {
   }
 
   resetPosition() {
+    this.clearScan();
     const spawn = this.env.spawn;
     const wasSeated = this.seated;
     this.seated = false;
@@ -627,7 +693,8 @@ class App {
     this.fridgeSelected = null;
     this.env.setFridgeOpen?.(false);
     this.contextMuted = null;
-    this.shelfSpoken.clear();
+    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false };
+    this.risk = 'clear';
     this.hud.hideContext();
     if (wasSeated && this.preSitCamera === 'third') {
       this.camMode = 'third';
@@ -651,6 +718,7 @@ class App {
   }
 
   toggleDemo() {
+    if (this.held || this.scan) this.clearScan();
     if (this.env.kind === 'labyrinth') {
       this.hud.toast('El recorrido automático está disponible en la casa y el corredor');
       return;
@@ -711,26 +779,6 @@ class App {
     return ['Estante inferior', 'Segundo estante', 'Tercer estante', 'Estante superior'][level] || 'Estante';
   }
 
-  describeShelfText(shelf, distance) {
-    const levelIntro = ['abajo', 'en el segundo estante', 'en el tercer estante', 'arriba'];
-    const parts = [];
-    for (const level of [3, 2, 1, 0]) {
-      const voices = shelf.items.filter((i) => i.level === level).map((i) => i.voice);
-      if (voices.length) parts.push(`${levelIntro[level]} hay ${this.joinEs(voices)}`);
-    }
-    const body = parts.join('; ');
-    return `${shelf.label}, a ${fmtDist(distance)}. ${body.charAt(0).toUpperCase()}${body.slice(1)}.`;
-  }
-
-  speakShelf(shelf, force = false) {
-    const d = this.distanceTo(shelf.point);
-    this.speak(this.describeShelfText(shelf, d), {
-      priority: force ? 3 : 1,
-      log: true,
-    });
-    this.contextTimer = 1;
-  }
-
   renderContext(key, payload, id) {
     this.contextCurrentId = id;
     if (this.contextMuted === id) {
@@ -740,8 +788,432 @@ class App {
     this.hud.showContext(key, payload);
   }
 
+  /* ================= Escaneo activo con la cámara POV ================= */
+  isDescendant(object, root) {
+    let node = object;
+    while (node) {
+      if (node === root) return true;
+      node = node.parent;
+    }
+    return false;
+  }
+
+  scanItemKey(item) {
+    return `${item.id || item.name}|${item.level ?? ''}`;
+  }
+
+  scanCandidates(target) {
+    const raw = target.type === 'fridge' ? (target.products || []) : (target.items || []);
+    const items = raw.filter((item) => item.object);
+    if (!items.length) return [];
+    this.scanRay.camera = this.camera;
+    this.camera.updateMatrixWorld(true);
+    this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
+    const frustum = new THREE.Frustum().setFromProjectionMatrix(
+      new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse)
+    );
+    const camPos = this.camera.position;
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const maxDist = target.type === 'fridge' ? 2.8 : 3.2;
+    const candidates = [];
+    for (const item of items) {
+      this.scanBox.setFromObject(item.object);
+      if (this.scanBox.isEmpty()) continue;
+      this.scanBox.getBoundingSphere(this.scanSphere);
+      const sphere = this.scanSphere.clone();
+      const dist = sphere.center.distanceTo(camPos);
+      if (dist > maxDist || dist < 0.08) continue;
+      if (!frustum.intersectsSphere(sphere)) continue;
+      const dir = sphere.center.clone().sub(camPos).normalize();
+      if (dir.dot(forward) < 0.15) continue;
+      candidates.push({ item, dist, center: sphere.center.clone(), radius: sphere.radius });
+    }
+    if (!candidates.length) return [];
+    const visible = [];
+    for (const candidate of candidates) {
+      if (this.isVisibleFromCamera(candidate)) visible.push(candidate);
+    }
+    // Si el propio estante tapa el centro del objeto, el barrido aún puede
+    // verlo desde otro ángulo; se conserva lo que está dentro del frustum.
+    const result = visible.length ? visible : candidates;
+    result.sort((a, b) => a.dist - b.dist);
+    return result;
+  }
+
+  isVisibleFromCamera(candidate) {
+    const camPos = this.camera.position;
+    const radius = Math.max(0.02, candidate.radius || 0.02);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    const offsets = [
+      [0, 0],
+      [radius * 0.55, 0],
+      [-radius * 0.55, 0],
+      [0, radius * 0.45],
+      [0, -radius * 0.45],
+    ];
+    for (const [ox, oy] of offsets) {
+      const point = candidate.center.clone()
+        .addScaledVector(right, ox)
+        .addScaledVector(up, oy);
+      const dir = point.sub(camPos);
+      const len = dir.length();
+      if (len < 0.05) return true;
+      dir.divideScalar(len);
+      this.scanRay.set(camPos, dir);
+      this.scanRay.near = 0.02;
+      this.scanRay.far = len + 0.2;
+      this.scanRay.camera = this.camera;
+      const hit = this.scanRay.intersectObjects(this.env.targets, true)[0];
+      if (!hit) return true;
+      if (this.isDescendant(hit.object, candidate.item.object)) return true;
+      if (hit.distance >= len - 0.1) return true;
+    }
+    return false;
+  }
+
+  startScan(target) {
+    if (!target) return;
+    this.stopIntro();
+    this.cancelDemo();
+    if (this.held) this.returnHeld({ silent: true });
+    if (this.seated) this.standUp();
+    if (target.type === 'fridge' && !this.fridgeOpen) this.toggleFridge(true);
+
+    const look = target.look || new THREE.Vector3(
+      target.point.x,
+      target.type === 'table' ? 0.85 : 1.15,
+      target.point.z
+    );
+    const dx = look.x - this.player.x;
+    const dz = look.z - this.player.z;
+    if (Math.hypot(dx, dz) > 0.04) {
+      this.player.yaw = Math.atan2(dx, dz);
+      this.viewYaw = this.player.yaw;
+    }
+    this.camMode = 'pov';
+    this.hud.setCameraMode('pov');
+    const config = target.type === 'shelf'
+      ? { from: 0.2, to: -0.62, duration: 2100 }
+      : target.type === 'table'
+        ? { from: 0.08, to: -0.72, duration: 1500 }
+        : { from: 0.12, to: -0.78, duration: 2000 };
+    this.viewPitch = config.from;
+    this.scan = {
+      seq: ++this.scanSeq,
+      target,
+      found: new Map(),
+      items: [],
+      done: false,
+      empty: false,
+      summary: '',
+      startedAt: performance.now(),
+      lastSample: 0,
+      pitchFrom: config.from,
+      pitchTo: config.to,
+      duration: config.duration,
+    };
+    this.contextMuted = null;
+    this.contextCurrentId = null;
+    this.contextTimer = 1;
+    this.hud.hideContext();
+    this.hud.showScan('Escaneando con la cámara', `${target.label} · barrido POV`);
+    this.updateCamera(1 / 60, true);
+    this.speak('Escaneando con la cámara.', { priority: 0, log: false });
+  }
+
+  updateScan() {
+    const scan = this.scan;
+    if (!scan || scan.done) return;
+    const now = performance.now();
+    const t = clamp((now - scan.startedAt) / scan.duration, 0, 1);
+    const eased = t * t * (3 - 2 * t);
+    this.viewPitch = lerp(scan.pitchFrom, scan.pitchTo, eased);
+    this.camMode = 'pov';
+    this.updateCamera(1 / 60, true);
+    if (now - scan.lastSample > 120) {
+      scan.lastSample = now;
+      for (const candidate of this.scanCandidates(scan.target)) {
+        const key = this.scanItemKey(candidate.item);
+        const prev = scan.found.get(key);
+        if (!prev || candidate.dist < prev.dist) scan.found.set(key, candidate);
+      }
+    }
+    if (t >= 1) this.finishScan();
+  }
+
+  finishScan() {
+    const scan = this.scan;
+    if (!scan || scan.done) return;
+    scan.items = [...scan.found.values()].sort((a, b) => a.dist - b.dist);
+    scan.done = true;
+    scan.empty = scan.items.length === 0;
+    this.viewPitch = scan.target.type === 'fridge' ? -0.6 : scan.target.type === 'table' ? -0.45 : -0.3;
+    this.updateCamera(1 / 60, true);
+    this.contextMuted = null;
+    this.contextTimer = 1;
+
+    if (scan.empty) {
+      this.hud.showScan('Sin lectura clara', 'Acércate y vuelve a escanear', { mode: 'error', autoHide: 3200 });
+      this.speak('No distingo ningún objeto desde aquí. Acércate un poco, gira hacia la superficie y vuelve a escanear.', { priority: 2, log: true });
+      return;
+    }
+
+    scan.summary = this.buildScanSummary(scan.items.map((entry) => entry.item));
+    this.hud.showScan('Escaneo completado', `${scan.items.length} objetos · F para acercar`, { autoHide: 2800 });
+    this.speak(`${scan.summary} ${scan.items.length === 1 ? 'Pulsa F para acercarlo.' : 'Pulsa F para acercar el primero.'}`, { priority: 2, log: true });
+  }
+
+  buildScanSummary(items) {
+    const groups = new Map();
+    for (const item of items) {
+      const category = item.category || 'objetos';
+      if (!groups.has(category)) groups.set(category, { category, items: [], count: 0 });
+      const group = groups.get(category);
+      group.items.push(item);
+      group.count += Number(item.count) || 1;
+    }
+    const ordered = [...groups.values()].sort((a, b) => b.count - a.count);
+    const phrases = [];
+    for (const group of ordered) {
+      if (group.items.length === 1) {
+        const item = group.items[0];
+        const itemCount = Number(item.count) || 1;
+        if (item.summary && itemCount === group.count) {
+          phrases.push(item.summary);
+          continue;
+        }
+        if (group.count === 1 && item.voice) {
+          phrases.push(item.voice);
+          continue;
+        }
+      }
+      const [one, many] = CATEGORY_WORDS[group.category] || ['objeto', 'objetos'];
+      phrases.push(pluralFor(group.count, group.count === 1 ? one : many));
+    }
+    const shown = phrases.slice(0, 4);
+    let list = this.joinEs(shown);
+    const extra = phrases.length - shown.length;
+    if (extra > 0) list += extra === 1 ? ' y algún objeto más' : ` y ${numEs(extra)} tipos de objetos más`;
+    return `Con la cámara veo ${list}.`;
+  }
+
+  ensureHeldStage() {
+    if (this.heldStage) return;
+    const stage = new THREE.Group();
+    const backdrop = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.7, 1.15),
+      new THREE.MeshBasicMaterial({ color: 0x050a12, transparent: true, opacity: 0.97, depthWrite: true })
+    );
+    backdrop.position.set(0, 0, -1.0);
+    stage.add(backdrop);
+    const borderMat = new THREE.MeshBasicMaterial({ color: 0x3ee0d0, transparent: true, opacity: 0.28, toneMapped: false });
+    for (const [w, h, x, y] of [
+      [1.7, 0.012, 0, 0.575],
+      [1.7, 0.012, 0, -0.575],
+      [0.012, 1.15, -0.85, 0],
+      [0.012, 1.15, 0.85, 0],
+    ]) {
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), borderMat);
+      line.position.set(x, y, -0.995);
+      stage.add(line);
+    }
+    stage.visible = false;
+    this.camera.add(stage);
+    this.heldStage = stage;
+  }
+
+  takeHeldItem(item) {
+    if (!item?.object) return;
+    if (this.held?.item === item) return;
+    if (this.held) this.returnHeld({ silent: true });
+    this.stopIntro();
+    this.cancelDemo();
+    this.ensureHeldStage();
+    this.camera.updateMatrixWorld(true);
+    const object = item.object;
+    const box = new THREE.Box3().setFromObject(object);
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const size = box.getSize(new THREE.Vector3());
+    const factor = clamp(0.11 / Math.max(0.04, sphere.radius), 0.6, 1.25);
+    const held = {
+      item,
+      object,
+      parent: object.parent,
+      position: object.position.clone(),
+      quaternion: object.quaternion.clone(),
+      scale: object.scale.clone(),
+    };
+    this.camera.attach(object);
+    this.env.group.visible = false;
+    if (this.heldStage) this.heldStage.visible = true;
+    object.position.set(0.02, -0.04, -0.72);
+    const showCover = item.category === 'libros' || (size.x < size.z * 0.75 && size.z > size.y * 0.75);
+    if (showCover) object.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+    else object.quaternion.set(0, 0, 0, 1);
+    object.scale.copy(held.scale).multiplyScalar(factor);
+    held.materials = [];
+    object.traverse((node) => {
+      if (!node.isMesh || !node.material) return;
+      const originals = Array.isArray(node.material) ? node.material : [node.material];
+      const clones = originals.map((material) => {
+        const clone = material.clone();
+        if (clone.color) clone.color.multiplyScalar(0.8);
+        if (clone.emissive) clone.emissive.multiplyScalar(0.35);
+        if ('emissiveIntensity' in clone) clone.emissiveIntensity *= 0.55;
+        return clone;
+      });
+      held.materials.push({ mesh: node, originals });
+      node.material = Array.isArray(node.material) ? clones : clones[0];
+    });
+    this._heldExposure = this.renderer.toneMappingExposure;
+    this.renderer.toneMappingExposure = 0.9;
+    this.held = held;
+    this.contextMuted = null;
+    this.contextCurrentId = null;
+    this.contextTimer = 1;
+    this.hud.hideContext();
+    this.renderHeldContext();
+    this.hud.showScan('Objeto acercado', `${item.name} · F para devolver`, { mode: 'held' });
+    const title = item.title || item.name;
+    const detail = item.detail || item.voice || 'Lo tienes delante de la cámara.';
+    this.speak(`Tienes «${title}» delante de la cámara. ${detail} Pulsa F para devolverlo.`, { priority: 3, log: true });
+  }
+
+  returnHeld({ silent = false } = {}) {
+    if (!this.held) return;
+    const held = this.held;
+    this.held = null;
+    if (this.heldStage) this.heldStage.visible = false;
+    this.env.group.visible = this.mode !== 'model';
+    if (this._heldExposure) {
+      this.renderer.toneMappingExposure = this._heldExposure;
+      this._heldExposure = null;
+    }
+    if (held.materials) {
+      for (const entry of held.materials) {
+        const current = entry.mesh.material;
+        entry.mesh.material = Array.isArray(current) ? entry.originals : entry.originals[0];
+        for (const material of (Array.isArray(current) ? current : [current])) material.dispose?.();
+      }
+      held.materials = null;
+    }
+    if (held.parent) {
+      held.parent.add(held.object);
+      held.object.position.copy(held.position);
+      held.object.quaternion.copy(held.quaternion);
+      held.object.scale.copy(held.scale);
+    }
+    if (!silent) {
+      this.contextMuted = null;
+      this.contextTimer = 1;
+      this.hud.showScan('Objeto devuelto', 'En su sitio · puedes volver a escanear', { autoHide: 1700 });
+      this.speak('Objeto devuelto a su sitio.', { priority: 1, log: false });
+      this.updateInteractions(0.2);
+    }
+  }
+
+  clearScan() {
+    if (this.held) this.returnHeld({ silent: true });
+    this.scan = null;
+    this.hud?.hideScan();
+    this.hud?.hideContext();
+    this.contextMuted = null;
+    this.contextCurrentId = null;
+  }
+
+  getPreferredScanItem() {
+    if (!this.scan?.done || !this.scan.items.length) return null;
+    if (this.fridgeSelected) {
+      const match = this.scan.items.find((entry) => entry.item.id === this.fridgeSelected);
+      if (match) return match.item;
+    }
+    return this.scan.items[0].item;
+  }
+
+  renderHeldContext() {
+    if (!this.held) return;
+    const item = this.held.item;
+    this.renderContext(`held:${item.id || item.name}:${this.scan?.seq || 0}`, {
+      eyebrow: 'OBJETO ACERCADO · CÁMARA POV',
+      title: item.title || item.name,
+      text: item.detail || item.voice || 'El objeto está delante de la cámara del arnés.',
+      items: [{ label: item.name, meta: item.category || 'objeto' }],
+      actions: [{ label: 'Devolver objeto', hint: 'F', primary: true, onClick: () => this.returnHeld() }],
+    }, 'held');
+  }
+
+  renderScanTarget(target, near, distLabel, zone) {
+    const scan = this.scan?.target?.id === target.id ? this.scan : null;
+    if (!scan) {
+      const closed = target.type === 'fridge' && !this.fridgeOpen;
+      this.renderContext(`scan-prompt:${target.id}`, {
+        eyebrow: `${zone} · A ${distLabel}`,
+        title: target.label,
+        text: closed
+          ? 'Puerta cerrada. Abre la nevera y escanea el interior con la cámara en POV; AURA solo reconocerá lo que esté a la vista.'
+          : target.type === 'fridge'
+            ? 'El interior está abierto. Pulsa E para barrer con la cámara y contar los productos visibles.'
+            : 'La cámara del arnés está en POV. Pulsa E para hacer un barrido vertical y reconocer solo lo que está a la vista.',
+        items: [],
+        actions: [{
+          label: closed ? 'Abrir y escanear' : 'Escanear con la cámara',
+          hint: 'E',
+          primary: true,
+          onClick: () => this.startScan(target),
+        }],
+      }, target.id);
+      return;
+    }
+
+    if (!scan.done) {
+      this.renderContext(`scan-progress:${target.id}:${scan.seq}`, {
+        eyebrow: `ESCANEO POV · ${zone}`,
+        title: `Barriendo ${target.label.toLowerCase()}`,
+        text: 'Mantén la mirada en la superficie. La cámara está recorriendo el estante o la mesa para reconocer los objetos visibles.',
+        items: [],
+        actions: [],
+      }, target.id);
+      return;
+    }
+
+    if (scan.empty) {
+      this.renderContext(`scan-empty:${target.id}:${scan.seq}`, {
+        eyebrow: `ESCANEO POV · ${zone}`,
+        title: `${target.label} · sin lectura clara`,
+        text: 'No distingo objetos desde esta posición. Acércate un poco, orienta la cámara hacia la superficie y vuelve a escanear.',
+        items: [],
+        actions: [
+          { label: 'Volver a escanear', hint: 'E', primary: true, onClick: () => this.startScan(target) },
+          ...(target.type === 'fridge' ? [{ label: 'Cerrar nevera', onClick: () => this.toggleFridge(false) }] : []),
+        ],
+      }, target.id);
+      return;
+    }
+
+    const items = scan.items.map((entry) => entry.item);
+    const actions = items.slice(0, 3).map((item, index) => ({
+      label: `Acercar ${lowerFirst(item.name)}`,
+      hint: index === 0 ? 'F' : undefined,
+      primary: index === 0,
+      onClick: () => this.takeHeldItem(item),
+    }));
+    actions.push({ label: 'Volver a escanear', hint: 'E', onClick: () => this.startScan(target) });
+    if (target.type === 'fridge') {
+      actions.push({ label: 'Cerrar nevera', onClick: () => this.toggleFridge(false) });
+    }
+    this.renderContext(`scan:${target.id}:${scan.seq}:${items.length}`, {
+      eyebrow: `ESCANEO POV · ${zone}`,
+      title: `${target.label} · escaneo activo`,
+      text: `${scan.summary} El reconocimiento se ha hecho con la cámara del arnés; puedes acercar un objeto con F.`,
+      items: items.map((item) => ({ label: item.name, meta: item.title || item.category || 'objeto' })),
+      actions,
+    }, target.id);
+  }
+
   sitOnSofa(sofa) {
     if (!sofa?.seats?.length) return;
+    this.clearScan();
     this.stopIntro();
     let seat = sofa.seats[0];
     let best = Infinity;
@@ -826,14 +1298,19 @@ class App {
         this.viewPitch = 0;
       }
     }
+    if (!open && this.held?.item && this.fridgeSelected) this.returnHeld({ silent: true });
     this.fridgeOpen = open;
     this.fridgeSelected = null;
     this.env.setFridgeOpen?.(open);
     this.contextMuted = null;
     this.contextTimer = 1;
+    if (!open) {
+      this.scan = null;
+      this.hud.hideScan();
+    }
     if (open) {
-      this.hud.toast('Nevera abierta · elige un producto', 3000);
-      this.speak('Nevera abierta. En el estante superior hay yogur y queso; en el estante medio, leche y agua; abajo, manzanas y verduras. ¿Qué andas buscando?', { priority: 3, log: true });
+      this.hud.toast('Nevera abierta · escanea el interior', 3000);
+      this.speak('Nevera abierta. Pulsa E para escanear el interior con la cámara.', { priority: 2, log: false });
     } else {
       this.hud.toast('Nevera cerrada');
       this.speak('Nevera cerrada.', { priority: 2, log: false });
@@ -849,11 +1326,16 @@ class App {
     this.contextMuted = null;
     this.contextTimer = 1;
     this.hud.toast(`${product.name} · ${product.level}`, 3000);
-    this.speak(product.voice, { priority: 3, log: true });
+    this.hud.showScan('Producto seleccionado', `${product.name} · F para acercarlo`, { autoHide: 2600 });
+    this.speak(`${product.title || product.name}. ${product.detail || product.voice}`, { priority: 2, log: true });
   }
 
   interact() {
     this.stopIntro();
+    if (this.held) {
+      this.returnHeld();
+      return;
+    }
     if (this.seated) {
       this.standUp();
       return;
@@ -864,16 +1346,26 @@ class App {
       this.speak('No detecto ningún objeto interactivo a tu alcance.', { priority: 1, log: false });
       return;
     }
-    if (near.type === 'fridge') this.toggleFridge();
+    if (near.type === 'fridge' || near.type === 'shelf' || near.type === 'table') this.startScan(near);
     else if (near.type === 'sofa') this.sitOnSofa(near);
-    else if (near.type === 'shelf') this.speakShelf(near, true);
   }
 
   updateInteractions(dt) {
+    this.updateScan();
+
+    if (this.held) {
+      const target = this.scan?.target;
+      if (target && this.distanceTo(target.point) > target.radius + 1.3) {
+        this.returnHeld({ silent: true });
+      } else {
+        this.renderHeldContext();
+        return;
+      }
+    }
+
     this.contextTimer += dt;
     if (this.contextTimer < 0.18) return;
     this.contextTimer = 0;
-    const now = performance.now();
     const list = this.env.interactables || [];
     const fridge = list.find((i) => i.type === 'fridge');
 
@@ -882,20 +1374,12 @@ class App {
       this.fridgeOpen = false;
       this.fridgeSelected = null;
       this.env.setFridgeOpen?.(false);
+      if (this.scan?.target?.type === 'fridge') {
+        this.scan = null;
+        this.hud.hideScan();
+      }
       this.contextMuted = null;
       this.hud.hideContext();
-    }
-
-    // Narración automática de estanterías al acercarse
-    for (const item of list) {
-      if (item.type !== 'shelf') continue;
-      const d = this.distanceTo(item.point);
-      if (d > item.radius + 0.9) this.shelfSpoken.delete(item.id);
-      if (!this.seated && !this.fridgeOpen && d <= item.radius && !this.shelfSpoken.has(item.id) && now - this.lastShelfAt > 2200) {
-        this.shelfSpoken.add(item.id);
-        this.lastShelfAt = now;
-        this.speak(this.describeShelfText(item, d), { priority: 1, log: true });
-      }
     }
 
     if (this.seated) {
@@ -911,10 +1395,18 @@ class App {
 
     const near = this.getNearestInteractable();
     if (!near) {
+      if (this.scan) {
+        this.scan = null;
+        this.hud.hideScan();
+      }
       this.hud.hideContext();
       this.contextCurrentId = null;
       this.contextMuted = null;
       return;
+    }
+    if (this.scan && this.scan.target?.id !== near.id) {
+      this.scan = null;
+      this.hud.hideScan();
     }
     if (this.contextMuted && this.contextMuted !== near.id) this.contextMuted = null;
     const d = this.distanceTo(near.point);
@@ -922,34 +1414,17 @@ class App {
     const zone = (this.zone || '').toUpperCase();
 
     if (near.type === 'fridge') {
-      if (this.fridgeOpen) {
-        const selected = near.products?.find((p) => p.id === this.fridgeSelected);
-        this.renderContext(`fridge:open:${this.fridgeSelected || 'none'}:${d.toFixed(1)}`, {
-          eyebrow: `NEVERA ABIERTA · A ${distLabel} · ${zone}`,
-          title: selected ? `${selected.name}, localizado` : '¿Qué andas buscando?',
-          text: selected
-            ? `${selected.voice} Puedes elegir otro producto o cerrar la nevera.`
-            : 'AURA ha abierto la nevera y ha etiquetado el interior. Elige un producto o pulsa E para cerrar.',
-          items: (near.products || []).map((p) => ({ label: p.name, meta: p.level })),
-          actions: [
-            ...(near.products || []).map((p, i) => ({
-              label: p.name,
-              hint: String(i + 1),
-              active: this.fridgeSelected === p.id,
-              onClick: () => this.selectFridgeProduct(p.id),
-            })),
-            { label: 'Cerrar nevera', hint: 'E', onClick: () => this.toggleFridge(false) },
-          ],
-        }, near.id);
-      } else {
+      if (!this.fridgeOpen) {
         this.renderContext(`fridge:closed:${d.toFixed(1)}`, {
           eyebrow: `NEVERA · A ${distLabel} · ${zone}`,
           title: 'Nevera',
-          text: 'Puerta cerrada. AURA puede abrirla, describir el interior y ayudarte a encontrar un producto.',
+          text: 'Puerta cerrada. Abre la nevera y escanea el interior con la cámara para localizar productos visibles.',
           items: [],
-          actions: [{ label: 'Abrir nevera', hint: 'E', primary: true, onClick: () => this.toggleFridge(true) }],
+          actions: [{ label: 'Abrir y escanear', hint: 'E', primary: true, onClick: () => this.startScan(near) }],
         }, near.id);
+        return;
       }
+      this.renderScanTarget(near, near, distLabel, zone);
       return;
     }
 
@@ -964,15 +1439,8 @@ class App {
       return;
     }
 
-    if (near.type === 'shelf') {
-      const items = near.items.map((i) => ({ label: i.name, meta: this.shelfLevelName(i.level) }));
-      this.renderContext(`shelf:${near.id}:${d.toFixed(1)}`, {
-        eyebrow: `OBJETOS A ${distLabel} · ${zone}`,
-        title: near.label,
-        text: `${this.describeShelfText(near, d)} Pulsa «Describir» para volver a escucharla.`,
-        items,
-        actions: [{ label: 'Describir estantería', hint: 'E', primary: true, onClick: () => this.speakShelf(near, true) }],
-      }, near.id);
+    if (near.type === 'shelf' || near.type === 'table') {
+      this.renderScanTarget(near, near, distLabel, zone);
     }
   }
 
@@ -1043,7 +1511,7 @@ class App {
     this.lidar.update(dt, sensor, this.player.yaw, this.speed);
     this.hud.updateRadar(this.lidar, dt);
     this.hud.updateHotspots(this.rig, this.camera, 'sim', null);
-    this.hud.updateDetections(this.camera, this.env.obstacles, sensor, this.camMode === 'pov');
+    this.hud.updateDetections(this.camera, this.held ? [] : this.env.obstacles, sensor, this.camMode === 'pov' && !this.held);
 
     this.updateZone(dt);
     this.updateInteractions(dt);
@@ -1229,7 +1697,17 @@ class App {
     }
   }
 
-  /* ================= Riesgo y voz ================= */
+  /* ================= Tutor de voz y riesgo ================= */
+  presentObstacle(label) {
+    if (!label || label === 'Obstáculo' || label === 'Obstáculo bajo') return 'un obstáculo';
+    if (label === 'Pared') return 'una pared';
+    const l = lowerFirst(label);
+    if (/^(mesa|silla|estantería|nevera|lámpara|planta|ducha|isla|barra|encimera|consola|lavabo|cama|alfombra|puerta|ventana|radio|taza|botella)/.test(l)) {
+      return `una ${l}`;
+    }
+    return `un ${l}`;
+  }
+
   updateRisk(dt, sensor) {
     this.riskTimer += dt;
     if (this.riskTimer < 0.18) return;
@@ -1238,96 +1716,170 @@ class App {
     if (this.intro.active) return;
     if (performance.now() < this.riskArmAt) return;
     if (this.lidar.cycles < 1) return;
+    // Durante un escaneo o una inspección el usuario está quieto y la voz
+    // principal es la de la cámara; no se añaden avisos de proximidad.
+    if ((this.scan || this.held) && this.speed < 0.2) return;
 
     const scan = this.lidar.scan;
     const now = performance.now();
-
-    // Obstáculos bajos (detectados por la cámara de profundidad)
-    let lowDist = Infinity;
-    let lowAngle = 0;
-    let lowLabel = '';
     const fwdX = Math.sin(this.player.yaw);
     const fwdZ = Math.cos(this.player.yaw);
     const origin = new THREE.Vector3(this.player.x, 0.55, this.player.z);
     const box = new THREE.Box3();
     const center = new THREE.Vector3();
+    const hazards = new Map();
+    const addHazard = (side, d, label, low = false) => {
+      if (!isFinite(d) || d > 2.4) return;
+      const prev = hazards.get(side);
+      if (!prev || d < prev.d) hazards.set(side, { side, d, label: label || 'Obstáculo', low });
+    };
+
+    // Obstáculos bajos: la cámara de profundidad los localiza y el ángulo
+    // relativo permite agruparlos por lado sin disparar un aviso por paso.
+    const lowBySide = {};
     for (const obs of this.env.obstacles) {
       if (!obs.low) continue;
       box.setFromObject(obs.mesh);
+      if (box.isEmpty()) continue;
       box.getCenter(center);
       const dx = center.x - this.player.x;
       const dz = center.z - this.player.z;
       const len = Math.hypot(dx, dz) || 1;
-      const dot = (dx * fwdX + dz * fwdZ) / len;
-      const d = Math.max(0, box.distanceToPoint(origin));
-      if (dot < 0.55 || d > 2.4) continue;
-      if (d < lowDist) {
-        lowDist = d;
-        lowAngle = Math.atan2(dx, dz) - this.player.yaw;
-        lowLabel = obs.label;
+      if ((dx * fwdX + dz * fwdZ) / len < 0.2) continue;
+      const d = Math.max(0.05, box.distanceToPoint(origin));
+      if (d > 2.4) continue;
+      const rel = wrapAngle(Math.atan2(dx, dz) - this.player.yaw);
+      const side = Math.abs(rel) <= 0.55 ? 'front'
+        : rel > 0.55 && rel <= 1.45 ? 'right'
+          : rel < -0.55 && rel >= -1.45 ? 'left' : null;
+      if (!side) continue;
+      if (!lowBySide[side] || d < lowBySide[side].d) {
+        lowBySide[side] = { d, label: obs.label, rel };
       }
     }
 
-    let front = scan.front;
-    let label = scan.frontHit?.label || 'Obstáculo';
-    let angle = 0;
-    if (scan.frontHit) {
-      angle = wrapAngle(Math.atan2(scan.frontHit.x - sensor.x, scan.frontHit.z - sensor.z) - this.player.yaw);
+    if (lowBySide.front) addHazard('front', lowBySide.front.d, lowBySide.front.label, true);
+    if (isFinite(scan.front) && scan.front < 2.35) {
+      const prev = hazards.get('front');
+      if (!prev || scan.front < prev.d - 0.04) addHazard('front', scan.front, scan.frontHit?.label || 'Pared');
     }
-    if (lowDist < front) {
-      front = lowDist;
-      label = lowLabel || 'Obstáculo bajo';
-      angle = wrapAngle(lowAngle);
+    if (lowBySide.left) addHazard('left', lowBySide.left.d, lowBySide.left.label, true);
+    if (isFinite(scan.left) && scan.left < 0.72) {
+      const prev = hazards.get('left');
+      if (!prev || scan.left < prev.d - 0.04) addHazard('left', scan.left, scan.leftHit?.label || 'Pared');
     }
-    if (!isFinite(front)) front = 99;
+    if (lowBySide.right) addHazard('right', lowBySide.right.d, lowBySide.right.label, true);
+    if (isFinite(scan.right) && scan.right < 0.72) {
+      const prev = hazards.get('right');
+      if (!prev || scan.right < prev.d - 0.04) addHazard('right', scan.right, scan.rightHit?.label || 'Pared');
+    }
 
+    const frontD = hazards.get('front')?.d ?? Infinity;
+    const nearestD = hazards.size ? Math.min(...[...hazards.values()].map((h) => h.d)) : Infinity;
     let level = 'clear';
-    if (front < 0.8) level = 'critical';
-    else if (front < 1.45) level = 'danger';
-    else if (front < 2.7) level = 'warn';
-
-    const prevRisk = this.risk;
-    const changed = level !== prevRisk;
+    if (frontD < 0.8 || nearestD < 0.55) level = 'critical';
+    else if (frontD < 1.45 || nearestD < 0.8) level = 'danger';
+    else if (frontD < 2.35 || nearestD < 1.3) level = 'warn';
     this.risk = level;
 
-    const isMoving = this.speed > 0.15;
-    const repeatAfter = level === 'critical' ? 2200 : level === 'danger' ? 3400 : level === 'warn' ? 7000 : 0;
-    const due = level !== 'clear' && now - this.lastAlertAt > repeatAfter && (isMoving || level === 'critical');
+    const sides = ['front', 'left', 'right'].filter((side) => hazards.has(side));
+    const signature = `${level}|${sides.join('|')}`;
+    const tutor = this.tutor;
+    const critical = level === 'critical';
 
-    if (changed || due) {
-      const sideWord = angle > 0.16 ? ' a tu derecha' : angle < -0.16 ? ' a tu izquierda' : ' al frente';
-      const clearSide = scan.frontRight > scan.frontLeft + 0.45 ? 'Paso libre a la derecha.' : scan.frontLeft > scan.frontRight + 0.45 ? 'Paso libre a la izquierda.' : 'Detente y retrocede.';
-      let text = '';
-      if (level === 'critical') text = `¡Alto! ${label}${sideWord} a ${fmtDist(front)}.`;
-      else if (level === 'danger') text = `${label}${sideWord} a ${fmtDist(front)}. ${clearSide}`;
-      else if (level === 'warn') text = `Atención: ${label}${sideWord} a ${fmtDist(front)}.`;
-      else if (prevRisk !== 'clear') text = 'Camino despejado. Puedes continuar.';
+    if (level === 'clear') {
+      if (tutor.warned && now - tutor.lastAt > 1200 && now - tutor.lastClearAt > 7000) {
+        tutor.warned = false;
+        tutor.lastClearAt = now;
+        tutor.lastAt = now;
+        tutor.lastLevel = 'clear';
+        tutor.lastSignature = '';
+        this.speak('Camino despejado. Puedes continuar con tranquilidad.', { priority: 1, log: true });
+      }
+      return;
+    }
 
-      if (text) {
-        this.lastAlertAt = now;
-        const logLevel = level === 'critical' ? 'danger' : level === 'danger' ? 'warn' : 'info';
-        this.speak(text, { priority: level === 'critical' ? 3 : level === 'danger' ? 2 : 1, log: true, level: logLevel });
-        if (level !== 'clear') {
-          this.sonar.ping(front, Math.sin(angle));
-          if (this.sonarEnabled && this.audioEnabled && level === 'critical' && navigator.vibrate) navigator.vibrate([30, 50, 30]);
-        }
+    const leftBlocked = hazards.has('left');
+    const rightBlocked = hazards.has('right');
+    const leftOpen = Math.min(scan.frontLeft, scan.left);
+    const rightOpen = Math.min(scan.frontRight, scan.right);
+    let turn = rightOpen >= leftOpen ? 'right' : 'left';
+    if (leftBlocked && !rightBlocked) turn = 'right';
+    if (rightBlocked && !leftBlocked) turn = 'left';
+    const turnWord = turn === 'right' ? 'derecha' : 'izquierda';
+
+    const sidePhrase = { front: 'frente a ti', left: 'a tu izquierda', right: 'a tu derecha' };
+    let obstacleSentence = '';
+    if (sides.length > 1) {
+      obstacleSentence = `Hay varios objetos ${this.joinEs(sides.map((side) => sidePhrase[side]))}.`;
+    } else if (sides.length === 1) {
+      const hazard = hazards.get(sides[0]);
+      obstacleSentence = `Hay ${this.presentObstacle(hazard.label)} ${sidePhrase[hazard.side]}, a ${fmtDist(hazard.d)}.`;
+    }
+
+    let recommendation = '';
+    const sideOnly = !isFinite(frontD) && sides.length > 0;
+    if (frontD < 0.8) {
+      recommendation = leftBlocked && rightBlocked
+        ? 'Detente un momento y da un paso atrás; hay poco espacio a los lados.'
+        : `Detente un momento y da un paso atrás. Después gira ligeramente a la ${turnWord}.`;
+    } else if (sideOnly) {
+      recommendation = leftBlocked && rightBlocked
+        ? 'Reduce el paso y retrocede un poco para dejar espacio.'
+        : `Desplázate un poco a la ${turnWord} para dejar espacio.`;
+    } else if (leftBlocked && rightBlocked) {
+      recommendation = 'Reduce el paso; hay poco espacio a ambos lados.';
+    } else {
+      recommendation = `Gira ligeramente a la ${turnWord} para seguir avanzando.`;
+    }
+
+    let text = `${obstacleSentence} ${recommendation}`.trim();
+    if (critical) text = `Vamos con calma. ${text}`;
+
+    const input = this.input;
+    let movingToward = false;
+    let movingAway = false;
+    for (const side of sides) {
+      if (side === 'front') {
+        if (input.z > 0.1) movingToward = true;
+        else if (input.z < -0.1) movingAway = true;
+      } else if (side === 'left') {
+        if (input.x < -0.1) movingToward = true;
+        else if (input.x > 0.1) movingAway = true;
+      } else if (side === 'right') {
+        if (input.x > 0.1) movingToward = true;
+        else if (input.x < -0.1) movingAway = true;
       }
     }
 
-    // Aviso lateral
-    const sideMin = Math.min(scan.left, scan.right);
-    if (front > 1.7 && sideMin < 1.0 && now - this.lastSideAlert > 4500 && isMoving) {
-      this.lastSideAlert = now;
-      const side = scan.left < scan.right ? 'izquierda' : 'derecha';
-      this.speak(`Obstáculo a tu ${side} a ${fmtDist(sideMin)}.`, { priority: 1, log: true });
-      this.hud.log(`Obstáculo a la ${side} · ${fmtDist(sideMin)}`, 'warn');
-    }
+    const changed = level !== tutor.lastLevel;
+    const newScenario = signature !== tutor.lastSignature;
+    const minGap = critical ? 2400 : changed ? 2600 : 5200;
+    const canSpeak = !this.voice.speaking || critical;
+    if (!canSpeak) return;
+    if (movingAway && !movingToward && !changed) return;
 
-    // Pulsos sonoros continuos
+    let shouldSpeak = false;
+    if ((newScenario || changed) && now - tutor.lastAt > minGap) shouldSpeak = true;
+    else if (movingToward && now - tutor.lastAt > (critical ? 6000 : 11000)) shouldSpeak = true;
+    if (!shouldSpeak) return;
+
+    tutor.lastAt = now;
+    tutor.lastLevel = level;
+    tutor.lastSignature = signature;
+    tutor.warned = true;
+    const logLevel = level === 'critical' ? 'danger' : level === 'danger' ? 'warn' : 'info';
+    this.speak(text, { priority: critical ? 3 : level === 'danger' ? 2 : 1, log: true, level: logLevel });
+    if (this.audioEnabled && this.sonarEnabled) {
+      this.sonar.ping(isFinite(frontD) ? frontD : nearestD, Math.sin(hazards.get('front')?.rel || 0));
+    }
+    if (critical && this.sonarEnabled && this.audioEnabled && navigator.vibrate) navigator.vibrate([30, 50, 30]);
+
+    // Pulsos sonoros solo mientras el riesgo sigue activo y hay desplazamiento.
     this.sonarTimer += dt;
-    if (this.audioEnabled && this.sonarEnabled && isMoving && level !== 'clear' && this.sonarTimer > 0.75) {
+    if (this.audioEnabled && this.sonarEnabled && this.speed > 0.15 && (level === 'critical' || level === 'danger') && this.sonarTimer > 1.4) {
       this.sonarTimer = 0;
-      this.sonar.ping(front, Math.sin(angle));
+      this.sonar.ping(isFinite(frontD) ? frontD : nearestD, Math.sin(hazards.get('front')?.rel || 0));
     }
   }
 
@@ -1359,11 +1911,24 @@ class App {
     const scan = this.lidar.scan;
     let answer = '';
     if (kind === 'front') {
-      if (!isFinite(scan.front) || scan.front > 4.5) {
+      if (this.held) {
+        const item = this.held.item;
+        answer = `Tienes «${item.title || item.name}» delante de la cámara. ${item.detail || item.voice || ''}`.trim();
+      } else if (this.scan?.done && this.scan.items.length) {
+        answer = `${this.scan.summary} El escaneo se ha hecho con la cámara en POV.`;
+      } else if (!isFinite(scan.front) || scan.front > 4.5) {
         answer = 'Tienes el camino despejado al frente por más de cuatro metros.';
       } else {
-        const side = scan.frontRight > scan.frontLeft + 0.4 ? ' Hay paso a la derecha.' : scan.frontLeft > scan.frontRight + 0.4 ? ' Hay paso a la izquierda.' : ' Conviene detenerse.';
-        answer = `${scan.frontHit?.label || 'Obstáculo'} al frente a ${fmtDist(scan.front)}.${side}`;
+        const rel = scan.frontHit
+          ? wrapAngle(Math.atan2(scan.frontHit.x - this.player.x, scan.frontHit.z - this.player.z) - this.player.yaw)
+          : 0;
+        const where = rel > 0.16 ? 'a tu derecha' : rel < -0.16 ? 'a tu izquierda' : 'frente a ti';
+        const pass = scan.frontRight > scan.frontLeft + 0.4
+          ? 'Hay espacio a la derecha para continuar.'
+          : scan.frontLeft > scan.frontRight + 0.4
+            ? 'Hay espacio a la izquierda para continuar.'
+            : 'Conviene reducir el paso y girar despacio.';
+        answer = `Tienes ${this.presentObstacle(scan.frontHit?.label)} ${where}, a ${fmtDist(scan.front)}. ${pass}`;
       }
     } else if (kind === 'exit') {
       if (this.env.kind === 'home') {

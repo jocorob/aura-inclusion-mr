@@ -73,6 +73,11 @@ export class HUD {
     this.contextActions = document.getElementById('context-actions');
     this.contextKey = null;
     this.onContextClose = null;
+    this.scanHud = document.getElementById('scan-hud');
+    this.scanTitle = document.getElementById('scan-title');
+    this.scanSub = document.getElementById('scan-sub');
+    this.scanFrame = document.getElementById('scan-frame');
+    this.scanTimer = null;
 
     this.hotspots = [...document.querySelectorAll('.hotspot')];
     this.time = 0;
@@ -270,6 +275,34 @@ export class HUD {
 
     this.contextCard.hidden = false;
     document.body.classList.add('context-open');
+  }
+
+  showScan(title, sub, { mode = 'scan', autoHide = 0 } = {}) {
+    if (!this.scanHud || !this.scanFrame) return;
+    if (this.scanTimer) {
+      clearTimeout(this.scanTimer);
+      this.scanTimer = null;
+    }
+    this.scanTitle.textContent = title;
+    this.scanSub.textContent = sub;
+    this.scanHud.dataset.mode = mode;
+    this.scanFrame.dataset.mode = mode;
+    this.scanHud.hidden = false;
+    this.scanFrame.hidden = false;
+    document.body.classList.add('scan-open');
+    if (autoHide > 0) {
+      this.scanTimer = setTimeout(() => this.hideScan(), autoHide);
+    }
+  }
+
+  hideScan() {
+    if (this.scanTimer) {
+      clearTimeout(this.scanTimer);
+      this.scanTimer = null;
+    }
+    if (this.scanHud) this.scanHud.hidden = true;
+    if (this.scanFrame) this.scanFrame.hidden = true;
+    document.body.classList.remove('scan-open');
   }
 
   hideContext() {

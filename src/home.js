@@ -390,26 +390,25 @@ export function createHomeEnvironment() {
   addWall(3.74, -4.58, 5.6, 0.18);     // fondo del ala posterior
   addWall(1.0, -2.9, 0.18, 3.4);       // oeste del distribuidor
 
-  // Muro interior entre sala/cocina y el ala posterior (con vano al pasillo)
-  addWall(-2.1, -1.28, 7.0, 0.16);
-  addWall(3.0, -1.28, 0.8, 0.16);
-  addWall(4.9, -1.28, 3.0, 0.16);
-  // Tabique distribuidor / baño con puerta
-  addWall(3.4, -4.15, 0.16, 0.9);
-  addWall(3.4, -2.0, 0.16, 1.6);
+  // Muro interior entre sala/cocina y el ala posterior (vano de 1,8 m al pasillo)
+  addWall(-2.25, -1.28, 6.7, 0.16);   // de -5,6 a 1,1
+  addWall(4.65, -1.28, 3.5, 0.16);    // de 2,9 a 6,4
+  // Tabique distribuidor / baño con puerta amplia de 1,8 m
+  addWall(3.4, -4.3, 0.16, 0.6);      // de -4,6 a -4,0
+  addWall(3.4, -1.7, 0.16, 1.0);      // de -2,2 a -1,2
 
   // Puerta de entrada y vanos
-  addDoorFrame(-4.95, 4.38, 0.95, 0);
-  addMesh(new THREE.BoxGeometry(0.9, 2.06, 0.05), woodDark, -4.95, 1.03, 4.35);
-  addMesh(new THREE.SphereGeometry(0.028, 12, 10), steelMat, -4.58, 1.03, 4.3);
-  addDoorFrame(2.0, -1.28, 1.2, Math.PI / 2);
-  addDoorFrame(3.4, -3.25, 0.9, Math.PI / 2);
+  addDoorFrame(-4.95, 4.38, 1.8, 0);
+  addMesh(new THREE.BoxGeometry(1.7, 2.06, 0.05), woodDark, -4.95, 1.03, 4.35);
+  addMesh(new THREE.SphereGeometry(0.028, 12, 10), steelMat, -4.18, 1.03, 4.3);
+  addDoorFrame(2.0, -1.28, 1.8, 0);
+  addDoorFrame(3.4, -3.1, 1.8, Math.PI / 2);
   // Puerta abierta del baño
   const bathDoor = new THREE.Group();
-  bathDoor.position.set(3.44, 0, -2.8);
-  bathDoor.rotation.y = -1.15;
-  const bathPanel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 2.05, 0.88), new THREE.MeshStandardMaterial({ color: 0xeeeae0, roughness: 0.6 }));
-  bathPanel.position.set(0, 1.03, -0.44);
+  bathDoor.position.set(3.44, 0, -2.22);
+  bathDoor.rotation.y = -1.32;
+  const bathPanel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 2.05, 1.76), new THREE.MeshStandardMaterial({ color: 0xeeeae0, roughness: 0.6 }));
+  bathPanel.position.set(0, 1.03, -0.88);
   bathPanel.castShadow = true;
   bathDoor.add(bathPanel);
   group.add(bathDoor);
@@ -537,7 +536,7 @@ export function createHomeEnvironment() {
 
   // Lámpara de pie
   const lamp = new THREE.Group();
-  lamp.position.set(-1.55, 0, 3.35);
+  lamp.position.set(-4.78, 0, 0.22);
   const lampPole = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.02, 1.5, 10), darkMat);
   lampPole.position.y = 0.75;
   lamp.add(lampPole);
@@ -561,15 +560,15 @@ export function createHomeEnvironment() {
     id: 'shelf-sala-norte',
     label: 'Estantería de la sala',
     items: [
-      { name: 'Novela histórica', voice: 'una novela histórica', level: 1, kind: 'books' },
-      { name: 'Poesía', voice: 'un libro de poesía', level: 1, kind: 'book-thin' },
-      { name: 'Guía de lectura', voice: 'una guía de lectura', level: 1, kind: 'book-blue' },
-      { name: 'Cesta de mimbre', voice: 'una cesta de mimbre', level: 0, kind: 'basket' },
-      { name: 'Jarrón de cerámica', voice: 'un jarrón de cerámica', level: 0, kind: 'vase' },
-      { name: 'Radio portátil', voice: 'una radio portátil', level: 2, kind: 'radio' },
-      { name: 'Reloj de mesa', voice: 'un reloj de mesa', level: 2, kind: 'clock' },
-      { name: 'Marco de fotos', voice: 'un marco de fotos familiar', level: 3, kind: 'photo' },
-      { name: 'Planta pequeña', voice: 'una planta pequeña', level: 3, kind: 'plant' },
+      { name: 'Novela histórica', voice: 'una novela histórica', level: 1, kind: 'books', category: 'libros', count: 4, title: 'Historia de una ciudad', detail: '«Historia de una ciudad», una novela histórica de tapa dura con 384 páginas.' },
+      { name: 'Poesía', voice: 'un libro de poesía', level: 1, kind: 'book-thin', category: 'libros', count: 1, title: 'Poemas de Antonio Machado', detail: '«Poemas de Antonio Machado», una edición de bolsillo con 96 páginas y letra grande.' },
+      { name: 'Guía de lectura', voice: 'una guía de lectura', level: 1, kind: 'book-blue', category: 'libros', count: 1, title: 'Guía de lectura AURA', detail: '«Guía de lectura AURA», un manual en letra grande con pictogramas y consejos de orientación.' },
+      { name: 'Cesta de mimbre', voice: 'una cesta de mimbre', level: 0, kind: 'basket', category: 'hogar', count: 1, article: 'una', detail: 'Una cesta de mimbre tejida a mano; dentro hay una manta ligera doblada.' },
+      { name: 'Jarrón de cerámica', voice: 'un jarrón de cerámica', level: 0, kind: 'vase', category: 'decoración', count: 1, article: 'un', detail: 'Un jarrón de cerámica esmaltada con flores secas; la base tiene una etiqueta en braille.' },
+      { name: 'Radio portátil', voice: 'una radio portátil', level: 2, kind: 'radio', category: 'electrónica', count: 1, article: 'una', detail: 'Una radio portátil analógica con antena, dial grande y marca en relieve en el botón de encendido.' },
+      { name: 'Reloj de mesa', voice: 'un reloj de mesa', level: 2, kind: 'clock', category: 'electrónica', count: 1, article: 'un', detail: 'Un reloj de mesa con números grandes y agujas de alto contraste.' },
+      { name: 'Marco de fotos', voice: 'un marco de fotos familiar', level: 3, kind: 'photo', category: 'decoración', count: 1, article: 'un', detail: 'Un marco de fotos familiar de madera; la imagen es una reunión al aire libre.' },
+      { name: 'Planta pequeña', voice: 'una planta pequeña', level: 3, kind: 'plant', category: 'decoración', count: 1, article: 'una', detail: 'Una planta pequeña de interior en una maceta de barro con etiqueta de cuidados.' },
     ],
   });
   shelfA.group.position.set(-3.9, 0, -0.83);
@@ -577,6 +576,7 @@ export function createHomeEnvironment() {
   interactables.push({
     type: 'shelf', id: 'shelf-sala-norte', label: 'Estantería de la sala',
     point: new THREE.Vector3(-3.9, 0, 0.18), radius: 1.55, items: shelfA.items,
+    look: new THREE.Vector3(-3.9, 1.1, -0.83),
   });
   addObstacle(shelfA.group, 'Estantería', { w: 1.45, d: 0.5, cx: -3.9, cz: -0.83, labelOffset: 1.95 });
 
@@ -584,14 +584,14 @@ export function createHomeEnvironment() {
     id: 'shelf-sala-sur',
     label: 'Estantería junto al sofá',
     items: [
-      { name: 'Juego de mesa', voice: 'un juego de mesa', level: 0, kind: 'game' },
-      { name: 'Manta doblada', voice: 'una manta doblada', level: 0, kind: 'blanket' },
-      { name: 'Libro de cocina', voice: 'un libro de cocina', level: 1, kind: 'book-warm' },
-      { name: 'Diccionario', voice: 'un diccionario', level: 1, kind: 'book-green' },
-      { name: 'Altavoz inteligente', voice: 'un altavoz inteligente', level: 2, kind: 'speaker' },
-      { name: 'Mando de televisión', voice: 'el mando de la televisión', level: 2, kind: 'remote' },
-      { name: 'Vela aromática', voice: 'una vela aromática', level: 3, kind: 'candle' },
-      { name: 'Tazas', voice: 'dos tazas de desayuno', level: 3, kind: 'mugs' },
+      { name: 'Juego de mesa', voice: 'un juego de mesa', level: 0, kind: 'game', category: 'hogar', count: 1, article: 'un', detail: 'Un juego de mesa familiar de cartón, con fichas de madera y reglas en braille.' },
+      { name: 'Manta doblada', voice: 'una manta doblada', level: 0, kind: 'blanket', category: 'hogar', count: 1, article: 'una', detail: 'Una manta de algodón doblada, suave y de color mostaza.' },
+      { name: 'Libro de cocina', voice: 'un libro de cocina', level: 1, kind: 'book-warm', category: 'libros', count: 1, title: 'Cocina para todos los días', detail: '«Cocina para todos los días», un recetario con 120 platos y pasos numerados.' },
+      { name: 'Diccionario', voice: 'un diccionario', level: 1, kind: 'book-green', category: 'libros', count: 1, title: 'Diccionario de la lengua española', detail: '«Diccionario de la lengua española», edición actualizada con definiciones en letra grande.' },
+      { name: 'Altavoz inteligente', voice: 'un altavoz inteligente', level: 2, kind: 'speaker', category: 'electrónica', count: 1, article: 'un', detail: 'Un altavoz inteligente cilíndrico; el anillo luminoso indica que está conectado.' },
+      { name: 'Mando de televisión', voice: 'el mando de la televisión', level: 2, kind: 'remote', category: 'electrónica', count: 1, article: 'un', detail: 'Un mando de televisión con botones en relieve y una marca táctil en el botón de encendido.' },
+      { name: 'Vela aromática', voice: 'una vela aromática', level: 3, kind: 'candle', category: 'decoración', count: 1, article: 'una', detail: 'Una vela aromática de lavanda en un vaso de cristal.' },
+      { name: 'Tazas', voice: 'dos tazas de desayuno', level: 3, kind: 'mugs', category: 'menaje', count: 2, article: 'dos', detail: 'Dos tazas de desayuno de cerámica, una blanca y otra verde.' },
     ],
   });
   shelfB.group.position.set(-1.1, 0, -0.83);
@@ -599,6 +599,7 @@ export function createHomeEnvironment() {
   interactables.push({
     type: 'shelf', id: 'shelf-sala-sur', label: 'Estantería junto al sofá',
     point: new THREE.Vector3(-1.1, 0, 0.12), radius: 1.5, items: shelfB.items,
+    look: new THREE.Vector3(-1.1, 1.1, -0.83),
   });
   addObstacle(shelfB.group, 'Estantería', { w: 1.45, d: 0.5, cx: -1.1, cz: -0.83, labelOffset: 1.95 });
 
@@ -712,6 +713,7 @@ export function createHomeEnvironment() {
   interactables.push({
     type: 'fridge', id: 'nevera', label: 'Nevera',
     point: new THREE.Vector3(5.1, 0, -0.45), radius: 1.5,
+    look: new THREE.Vector3(5.78, 1.1, -0.45),
     products: fridgeRig.products,
   });
 
@@ -741,6 +743,47 @@ export function createHomeEnvironment() {
   const tableLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.72, 12), darkMat);
   tableLeg.position.y = 0.36;
   table.add(tableLeg);
+  // Objetos sobre la mesa para el escaneo activo en POV
+  const tableItems = [];
+  const addTableItem = (meta, kind, x, y, z, rot = 0) => {
+    const object = makeShelfItem(kind);
+    if (!object) return;
+    object.position.set(x, y, z);
+    object.rotation.y = rot;
+    object.traverse((o) => {
+      if (o.isMesh) o.userData.itemLabel = meta.name;
+    });
+    table.add(object);
+    tableItems.push({ ...meta, object });
+  };
+  addTableItem({
+    name: 'Libro de recetas', voice: 'un libro de recetas', category: 'libros', count: 1, summary: 'un libro de recetas',
+    title: 'Cocina para todos los días', detail: '«Cocina para todos los días», un recetario con 120 platos y pasos numerados.',
+  }, 'book-warm', -0.04, 0.77, 0.06, 0.35);
+  addTableItem({
+    name: 'Tazas de café', voice: 'dos tazas de café', category: 'menaje', count: 2, article: 'dos', summary: 'dos tazas de café',
+    detail: 'Dos tazas de cerámica blanca, todavía tibias, con asas amplias.',
+  }, 'mugs', 0.21, 0.77, -0.08, -0.15);
+  const fruitGroup = new THREE.Group();
+  fruitGroup.position.set(-0.2, 0.77, 0.14);
+  const fruitBowl2 = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.09, 0.08, 22), ceramicMat);
+  fruitBowl2.position.y = 0.04;
+  fruitGroup.add(fruitBowl2);
+  for (let i = 0; i < 3; i++) {
+    const apple = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), new THREE.MeshStandardMaterial({ color: i === 1 ? 0x6e9a4a : 0xb64a3a, roughness: 0.6 }));
+    apple.position.set((i - 1) * 0.055, 0.1, (i % 2) * 0.02);
+    fruitGroup.add(apple);
+  }
+  table.add(fruitGroup);
+  tableItems.push({
+    name: 'Frutero', voice: 'un frutero con tres manzanas', category: 'fruta', count: 3, article: 'un', summary: 'tres manzanas',
+    detail: 'Un frutero de cerámica con tres manzanas, dos rojas y una verde.', object: fruitGroup,
+  });
+  interactables.push({
+    type: 'table', id: 'mesa-cocina', label: 'Mesa de desayuno',
+    point: new THREE.Vector3(4.2, 0, 3.35), radius: 1.35,
+    look: new THREE.Vector3(4.2, 0.85, 3.35), items: tableItems,
+  });
   addObstacle(table, 'Mesa de desayuno', { low: true, w: 1.05, d: 1.05, labelOffset: 0.9 });
   for (const s of [-1, 1]) {
     const chair = new THREE.Group();
@@ -966,7 +1009,7 @@ export function createHomeEnvironment() {
         }
       });
       shelf.add(object);
-      meta.push({ ...item, level });
+      meta.push({ ...item, level, object });
     }
     return { group: shelf, items: meta, id, label };
   }
@@ -1203,10 +1246,10 @@ export function createHomeEnvironment() {
     }
     // productos
     const products = [
-      { id: 'leche', name: 'Leche', voice: 'La leche está en el estante del medio, a la izquierda.', level: 'Estante medio' },
-      { id: 'manzana', name: 'Manzanas', voice: 'Las manzanas están en el cajón de verduras, abajo.', level: 'Cajón inferior' },
-      { id: 'agua', name: 'Agua', voice: 'El agua está en el estante del medio, a la derecha.', level: 'Estante medio' },
-      { id: 'queso', name: 'Queso', voice: 'El queso está en el estante superior, junto a los yogures.', level: 'Estante superior' },
+      { id: 'leche', name: 'Leche', voice: 'La leche está en el estante del medio, a la izquierda.', level: 'Estante medio', category: 'lácteos', count: 1, article: 'una', summary: 'una botella de leche', title: 'Botella de leche entera', detail: 'Una botella de leche entera de un litro, con tapón azul y etiqueta en relieve.' },
+      { id: 'manzana', name: 'Manzanas', voice: 'Las manzanas están en el cajón de verduras, abajo.', level: 'Cajón inferior', category: 'fruta', count: 3, article: 'tres', summary: 'tres manzanas', title: 'Tres manzanas', detail: 'Tres manzanas frescas: dos rojas y una verde, en el cajón inferior.' },
+      { id: 'agua', name: 'Agua', voice: 'El agua está en el estante del medio, a la derecha.', level: 'Estante medio', category: 'bebidas', count: 1, article: 'una', summary: 'una botella de agua', title: 'Botella de agua mineral', detail: 'Una botella de agua mineral de medio litro, transparente y con tapón azul.' },
+      { id: 'queso', name: 'Queso', voice: 'El queso está en el estante superior, junto a los yogures.', level: 'Estante superior', category: 'lácteos', count: 1, article: 'un', summary: 'un trozo de queso', title: 'Queso curado', detail: 'Un trozo de queso curado de oveja, envuelto en papel encerado.' },
     ];
     // leche
     const milk = new THREE.Group();
@@ -1222,17 +1265,21 @@ export function createHomeEnvironment() {
     milk.add(milkLabel);
     fridge.add(milk);
     // agua
+    const waterGroup = new THREE.Group();
+    fridge.add(waterGroup);
     const water = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.34, 14), new THREE.MeshPhysicalMaterial({ color: 0xa9dce6, transparent: true, opacity: 0.55, roughness: 0.05, metalness: 0, clearcoat: 1 }));
     water.position.set(0.18, 0.59, 0.02);
-    fridge.add(water);
+    waterGroup.add(water);
     const waterCap = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.035, 10), new THREE.MeshStandardMaterial({ color: 0x2d6b8e, roughness: 0.4 }));
     waterCap.position.set(0.18, 0.78, 0.02);
-    fridge.add(waterCap);
-    // manzanas
+    waterGroup.add(waterCap);
+    // manzanas (agrupadas para poder acercarlas a la cámara)
+    const apples = new THREE.Group();
+    fridge.add(apples);
     for (let i = 0; i < 3; i++) {
       const apple = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), new THREE.MeshStandardMaterial({ color: i === 1 ? 0x7da34c : 0xa94034, roughness: 0.55 }));
       apple.position.set(-0.18 + i * 0.12, 0.11, 0.01);
-      fridge.add(apple);
+      apples.add(apple);
     }
     // queso
     const cheese = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.06, 3), new THREE.MeshStandardMaterial({ color: 0xe4c56e, roughness: 0.7 }));
@@ -1253,6 +1300,11 @@ export function createHomeEnvironment() {
     lettuce.scale.set(1, 0.65, 1);
     lettuce.position.set(0.16, 0.16, 0.02);
     fridge.add(lettuce);
+
+    products[0].object = milk;
+    products[1].object = apples;
+    products[2].object = waterGroup;
+    products[3].object = cheese;
 
     // Puerta con bisagra
     const doorPivot = new THREE.Group();
