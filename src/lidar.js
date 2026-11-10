@@ -354,6 +354,10 @@ export class LidarSystem {
     let rear = Infinity;
     let frontHit = null;
     let nearestHit = null;
+    let leftHit = null;
+    let rightHit = null;
+    let frontLeftHit = null;
+    let frontRightHit = null;
     const contour = [];
 
     for (let i = 0; i < RAY_COUNT; i++) {
@@ -378,12 +382,24 @@ export class LidarSystem {
           frontHit = h;
         }
       } else if (a > 0.5 && a <= 1.4) {
-        if (dist < frontRight) frontRight = dist;
+        if (dist < frontRight) {
+          frontRight = dist;
+          frontRightHit = h;
+        }
       } else if (a < -0.5 && a >= -1.4) {
-        if (dist < frontLeft) frontLeft = dist;
+        if (dist < frontLeft) {
+          frontLeft = dist;
+          frontLeftHit = h;
+        }
       }
-      if (a <= -1.15 && a >= -2.0) left = Math.min(left, dist);
-      if (a >= 1.15 && a <= 2.0) right = Math.min(right, dist);
+      if (a <= -1.15 && a >= -2.0 && dist < left) {
+        left = dist;
+        leftHit = h;
+      }
+      if (a >= 1.15 && a <= 2.0 && dist < right) {
+        right = dist;
+        rightHit = h;
+      }
       if (absA > 2.4) rear = Math.min(rear, dist);
     }
 
@@ -397,6 +413,10 @@ export class LidarSystem {
       rear,
       frontHit,
       nearestHit,
+      leftHit,
+      rightHit,
+      frontLeftHit,
+      frontRightHit,
       contour,
       raysCast: RAY_COUNT,
       points: contour.length,

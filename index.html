@@ -255,9 +255,22 @@
     <div class="zone-label" id="zone-label"><span>ZONA</span><b>Pasillo A</b></div>
     <div class="scene-tip" id="scene-tip">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> desplazarse
-      <span class="sep">·</span> <kbd>E</kbd> interactuar
-      <span class="sep">·</span> <kbd>S</kbd> sentarse
+      <span class="sep">·</span> <kbd>E</kbd> escanear
+      <span class="sep">·</span> <kbd>F</kbd> acercar
       <span class="sep">·</span> <kbd>Espacio</kbd> cámara
+    </div>
+
+    <div id="scan-hud" class="scan-hud" role="status" aria-live="polite" hidden>
+      <span class="scan-dot" aria-hidden="true"></span>
+      <div>
+        <b id="scan-title">Escaneando con la cámara</b>
+        <span id="scan-sub">POV · reconocimiento activo</span>
+      </div>
+    </div>
+    <div id="scan-frame" class="scan-frame" aria-hidden="true" hidden>
+      <i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>
+      <span class="scan-sweep"></span>
+      <span class="scan-caption">AURA · VISIÓN POV</span>
     </div>
 
     <div id="context-card" class="context-card" role="region" aria-label="Interacción contextual" hidden>

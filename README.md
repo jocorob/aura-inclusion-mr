@@ -65,15 +65,20 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 
 El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y mobiliario modelados a escala. Incluye:
 
-- **Sala**: sofá de dos plazas, mesa de centro, mueble de TV, lámpara de pie, planta y dos estanterías con objetos etiquetados. Al acercarse a una estantería, AURA enumera los objetos estante por estante (arriba, tercer estante, segundo y abajo) en voz alta y en la tarjeta contextual.
-- **Cocina**: barra con taburetes y lámparas colgantes, encimera, mesa de desayuno y **nevera interactiva**. Al abrirla con `E`, la puerta se abre, se enciende la luz interior y AURA describe el contenido: *«En el estante superior hay yogur y queso; en el estante medio, leche y agua; abajo, manzanas y verduras. ¿Qué andas buscando?»*. Las opciones `1`–`4` responden con la localización exacta de cada producto simulado.
-- **Pasillo y baño**: consola, lavabo, inodoro, ducha y espejo, con colisiones independientes.
+- **Sala**: sofá de dos plazas, mesa de centro, mueble de TV, planta y dos estanterías. La lámpara de pie se ha retirado del recorrido del avatar y ahora vive junto al mueble de TV. Al acercarse a una estantería, AURA **no recita de memoria**: invita a pulsar `E` y solo describe lo que la cámara POV reconoce en ese momento.
+- **Cocina**: barra con taburetes y lámparas colgantes, encimera, mesa de desayuno y **nevera interactiva**. Con `E` se abre la puerta, se enciende la luz interior y comienza un barrido de cámara en primera persona. El resumen agrupa cantidades (*«Con la cámara veo tres manzanas, dos productos lácteos y una botella de agua»*); `1`–`4` seleccionan un producto y `F` lo acerca al arnés para leer su ficha.
+- **Mesa de desayuno**: libro de recetas, dos tazas y un frutero con tres manzanas. También se escanea en POV y sus objetos se pueden acercar con `F`.
+- **Escaneo activo POV**: al interactuar con estanterías, nevera o mesa, la cámara pasa a primera persona y hace un barrido vertical (con giro suave) antes de responder. Solo entran en el resumen los objetos que han pasado por el frustum y no estaban ocultos; las cantidades se agrupan por categorías para no saturar: *«Con la cámara veo seis libros, tres objetos decorativos, dos aparatos electrónicos y una cesta de mimbre»*.
+- **Acercar objetos**: con `F` (o tocando la acción «Acercar») el objeto sale de la estantería, la nevera o la mesa, se coloca sobre un fondo de inspección oscuro delante de la cámara y AURA lee su título y descripción detallada. `F`, `E` o `Esc` lo devuelven a su sitio.
+- **Pasillos y accesos**: el vano sala-cocina, la puerta del baño y la entrada principal tienen **1,8 m** de luz; el resto de circulaciones mantiene al menos 1,8 m para que el avatar y el arnés pasen sin rozar.
 - **Sentarse**: junto al sofá, `S` sienta al avatar; la cámara pasa a la altura de los ojos sentado, el arnés y la caja AURA bajan con el cuerpo, las piernas se flexionan y el LiDAR sigue activo. `S`, `E` o `Esc` vuelven a poner de pie.
 - Colisiones AABB precisas para paredes, puertas y mobiliario; los objetos bajos también alimentan la detección de riesgos de la cámara.
 
 ### 4. Interfaz de voz local (Edge AI)
 
-- Alertas en español natural con distancia, lado y recomendación de paso: *«Pared al frente a 1,2 metros. Paso libre a la derecha.»*, *«¡Alto! Obstáculo a tu izquierda a 40 centímetros.»*.
+- **Tutor de movilidad sin fatiga auditiva**: nada de «¡Alto!» ni un aviso por cada paso. Cuando hay varios obstáculos se agrupan en una sola frase natural —*«Hay varios objetos frente a ti y a tu izquierda. Gira ligeramente a la derecha para seguir avanzando.»*— y se añade una recomendación de giro o desplazamiento.
+- **Silencio inteligente**: un mismo escenario no se repite mientras el usuario avanza en una dirección segura; solo se vuelve a hablar si cambia el riesgo, si el usuario sigue acercándose tras un tiempo prudencial o si el camino queda despejado (un único mensaje de confirmación).
+- Durante un escaneo o una inspección con el objeto acercado, el tutor baja la voz y deja el protagonismo al reconocimiento de la cámara.
 - Subtítulos sincronizados en el panel **Voz local**, cola de mensajes con prioridad y repetición controlada para no saturar.
 - Sonar de proximidad opcional (Web Audio) para una pista no verbal de cercanía.
 - La demo sintetiza la voz en el propio navegador (Web Speech API, es-ES) y simula el pipeline **Whisper tiny + Piper TTS (davefx)** del Raspberry Pi 5. No hay peticiones de audio a servidores.
@@ -101,7 +106,8 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 | Activar/desactivar voz | `V` |
 | Reiniciar posición | `R` |
 | Mostrar/ocultar paneles | `M` |
-| Interactuar (nevera, estantería, sofá) | `E` |
+| Escanear con la cámara POV (nevera, estantería, mesa) | `E` |
+| Acercar / devolver el objeto escaneado | `F` |
 | Sentarse / levantarse del sofá | `S` (junto al sofá) |
 | Elegir producto de la nevera | `1` `2` `3` `4` |
 | Cambiar de entorno | Botones **Casa / Corredor / Laberinto** del dock |
@@ -114,6 +120,7 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 
 - D-pad en la barra inferior para caminar.
 - Botones de cámara (3ª persona / POV AURA), entorno (Casa / Corredor / Laberinto), recorrido automático y reinicio.
+- La tarjeta contextual ofrece «Escanear con la cámara» y «Acercar …» como botones táctiles; no hace falta teclado.
 - Botones de telemetría y voz en la barra superior.
 - Arrastrar sobre la escena para mirar.
 
@@ -149,7 +156,7 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 - **WebXR API** para sesiones inmersivas VR/AR.
 - **Web Audio API** para el sonar y **Web Speech API** para la voz en español.
 - Geometría y texturas generadas en canvas: no se descargan modelos ni imágenes externas.
-- **Contenido de la Casa** generado en código: muebles, productos de la nevera y objetos de las estanterías; la descripción se apoya en la misma cola de voz local.
+- **Contenido de la Casa** generado en código: muebles, productos de la nevera y objetos de las estanterías. Títulos y descripciones detalladas se leen con la misma cola de voz local solo después de que la cámara POV los haya visto.
 
 ## Desarrollo local
 
