@@ -93,7 +93,7 @@ class App {
     this.lastBatteryAlert = 0;
     this.risk = 'clear';
     this.riskTimer = 0;
-    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false, lastHeading: 2.0, lastWallAt: 0 };
+    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false, lastHeading: 2.0, lastWallAt: 0, routePlan: null };
     this.sonarTimer = 0;
     this.fpsFrames = 0;
     this.fpsTime = 0;
@@ -706,7 +706,7 @@ class App {
     this.rig.root.visible = true;
     this.contextMuted = null;
     this.contextCurrentId = null;
-    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false, lastHeading: 2.0, lastWallAt: 0 };
+    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false, lastHeading: 2.0, lastWallAt: 0, routePlan: null };
     this.risk = 'clear';
     this.intentPrompted = false;
     this.homeSince = performance.now();
@@ -755,7 +755,7 @@ class App {
     this.fridgeSelected = null;
     this.env.setFridgeOpen?.(false);
     this.contextMuted = null;
-    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false, lastHeading: 2.0, lastWallAt: 0 };
+    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false, lastHeading: 2.0, lastWallAt: 0, routePlan: null };
     this.risk = 'clear';
     this.hud.hideContext();
     if (wasSeated && this.preSitCamera === 'third') {
@@ -881,15 +881,19 @@ class App {
       index: 0,
       arrived: false,
       arrivedAt: 0,
+      microTarget: null,
+      lastMicroInstructionAt: 0,
     };
     const finalPoint = route[route.length - 1];
     this.intentHudAt = 0;
     this.hud.setGoal(meta.label, fmtDist(this.distanceTo(finalPoint)));
     const first = route[0];
-    const direction = this.intentDirection(first);
-    let speech = `Vamos ${meta.spoken}. El primer tramo queda ${direction}, a ${fmtDist(this.distanceTo(first))}.`;
-    if (id === 'fridge') speech += ' Al llegar, pulsa E para abrirla y escanear los productos.';
-    else speech += ' Te aviso al llegar.';
+    const firstStep = this.createIntentMicroStep(first);
+    this.intentGoal.microTarget = firstStep;
+    this.intentGoal.lastMicroInstructionAt = performance.now();
+    let speech = `Vamos ${meta.spoken}. ${this.intentMicroStepText(firstStep, first, 'Primer paso')}`;
+    if (firstStep.safe) speech += ' Te indico el siguiente paso al llegar.';
+    if (id === 'fridge') speech += ' Al llegar a la nevera, pulsa E para escanear los productos.';
     this.speak(speech, { priority: 2, log: true });
     this.hud.toast(`Objetivo: ${meta.label} · sigue las indicaciones de AURA`, 4200);
   }
@@ -987,24 +991,32 @@ class App {
       this.hud.setGoal(goal.label, fmtDist(finalDist));
     }
 
-    const waypoint = goal.route[goal.index];
+    let waypoint = goal.route[goal.index];
     if (!waypoint) return;
     const waypointDist = this.distanceTo(waypoint);
-    if (waypointDist > 0.82) return;
-
-    if (goal.index >= goal.route.length - 1) {
-      goal.arrived = true;
-      goal.arrivedAt = now;
-      this.hud.setGoal(goal.label, 'aquí');
-      this.speak(this.intentArrivalText(goal), { priority: 2, log: true });
-      return;
+    if (waypointDist <= 0.55) {
+      if (goal.index >= goal.route.length - 1) {
+        goal.arrived = true;
+        goal.arrivedAt = now;
+        this.hud.setGoal(goal.label, 'aquí');
+        this.speak(this.intentArrivalText(goal), { priority: 2, log: true });
+        return;
+      }
+      goal.index += 1;
+      goal.microTarget = null;
+      waypoint = goal.route[goal.index];
+      if (!waypoint) return;
     }
 
-    goal.index += 1;
-    const next = goal.route[goal.index];
-    if (!this.voice.speaking) {
-      this.speak(`Bien. Ahora ${next.label} queda ${this.intentDirection(next)}, a ${fmtDist(this.distanceTo(next))}.`, { priority: 1, log: true });
-    }
+    const currentStep = goal.microTarget;
+    if (currentStep?.safe && !this.intentMicroStepReached(currentStep)) return;
+    if (currentStep && !currentStep.safe && now - goal.lastMicroInstructionAt < 4000) return;
+    if (this.voice.speaking || now - goal.lastMicroInstructionAt < 700) return;
+
+    const step = this.createIntentMicroStep(waypoint);
+    goal.microTarget = step;
+    goal.lastMicroInstructionAt = now;
+    this.speak(this.intentMicroStepText(step, waypoint), { priority: 1, log: true });
   }
 
   joinEs(items) {
@@ -2211,10 +2223,161 @@ class App {
     return motion.x > 0 ? 'En diagonal a tu derecha' : 'En diagonal a tu izquierda';
   }
 
+  routeClearanceAt(heading, lidarFresh, maxDistance = 2.3) {
+    let clearance = Infinity;
+    let label = '';
+    const block = this.pathBlockAt(heading, 0.41, maxDistance);
+    if (block) {
+      const wall = block.label === 'Pared';
+      // Mantener intacto el filtro del tutor: los muros paralelos o lejanos
+      // no reducen la ruta libre ni disparan una falsa desviación.
+      if (!wall || (this.wallIsFrontal(block, heading) && block.sensorDistance <= 1.02)) {
+        clearance = block.sensorDistance;
+        label = block.label;
+      }
+    }
+
+    if (lidarFresh && this.lidar.hits?.length) {
+      const sensor = this.rig?.lidarAnchor
+        ? this.rig.lidarAnchor.getWorldPosition(this.sensorWorld)
+        : this.sensorWorld.set(this.player.x, 0, this.player.z);
+      const fx = Math.sin(heading);
+      const fz = Math.cos(heading);
+      const rx = Math.cos(heading);
+      const rz = -Math.sin(heading);
+      for (const hit of this.lidar.hits) {
+        if (!hit.active || !hit.label || hit.label === 'Pared') continue;
+        const dx = hit.x - sensor.x;
+        const dz = hit.z - sensor.z;
+        const forward = dx * fx + dz * fz;
+        const lateral = dx * rx + dz * rz;
+        if (forward <= 0.05 || forward > maxDistance || Math.abs(lateral) > 0.42) continue;
+        const distance = Math.hypot(dx, dz);
+        if (distance < clearance) {
+          clearance = distance;
+          label = hit.label;
+        }
+      }
+    }
+
+    return { clearance, label };
+  }
+
+  computeOptimalRouteStep(baseHeading, targetPoint = null, scan = this.lidar.scan) {
+    const targetDistance = targetPoint ? this.distanceTo(targetPoint) : Infinity;
+    const targetHeading = targetPoint && targetDistance > 0.05
+      ? Math.atan2(targetPoint.x - this.player.x, targetPoint.z - this.player.z)
+      : baseHeading;
+    const age = this.lidar.elapsed - (scan?.timestamp ?? -Infinity);
+    const lidarFresh = this.lidarEnabled && this.lidar.cycles > 0 && age >= 0 && age < 0.45;
+    const offsets = [0, -0.35, 0.35, -0.7, 0.7, -1.05, 1.05, -1.4, 1.4, -1.75, 1.75];
+    let best = null;
+
+    for (const offset of offsets) {
+      const heading = wrapAngle(baseHeading + offset);
+      const route = this.routeClearanceAt(heading, lidarFresh);
+      const progress = Math.cos(wrapAngle(heading - targetHeading));
+      const freeSpace = Number.isFinite(route.clearance) ? Math.min(1, route.clearance / 2.3) : 1;
+      const safetyPenalty = Number.isFinite(route.clearance)
+        ? Math.max(0, 1.25 - route.clearance) * 2.5
+        : 0;
+      const score = 2.6 * progress + 1.1 * freeSpace - 0.11 * Math.abs(offset) - safetyPenalty;
+      if (!best || score > best.score) best = { ...route, heading, offset, score };
+    }
+
+    const minSafeDistance = best.label === 'Pared' ? 0.55 : 0.65;
+    const safe = best.clearance >= minSafeDistance;
+    const available = Number.isFinite(best.clearance)
+      ? Math.max(0, best.clearance - minSafeDistance)
+      : 0.78;
+    const stepDistance = safe
+      ? Math.min(0.78, Number.isFinite(targetDistance) ? targetDistance : 0.78, available)
+      : 0;
+    const facingHeading = this.renderer?.xr?.isPresenting && this.xrMode === 'vr'
+      ? this.player.yaw
+      : this.viewYaw;
+    const turnDelta = wrapAngle(best.heading - facingHeading);
+    const turnAngle = Math.abs(turnDelta);
+    return {
+      heading: best.heading,
+      offset: best.offset,
+      turn: turnAngle < 0.18 ? 'straight' : turnDelta > 0 ? 'right' : 'left',
+      turnAngle,
+      clearance: best.clearance,
+      label: best.label,
+      safe,
+      stepDistance,
+      lidarFresh,
+      guided: Boolean(targetPoint),
+      updatedAt: performance.now(),
+    };
+  }
+
+  createIntentMicroStep(target) {
+    const motion = this.movementHeading();
+    const baseHeading = motion.moving ? motion.heading : this.viewYaw;
+    const plan = this.computeOptimalRouteStep(baseHeading, target, this.lidar.scan);
+    this.tutor.routePlan = plan;
+    if (!plan.safe || plan.stepDistance < 0.15) {
+      return {
+        safe: false,
+        plan,
+        point: { x: this.player.x, z: this.player.z },
+        origin: { x: this.player.x, z: this.player.z },
+        distance: 0,
+      };
+    }
+    const origin = { x: this.player.x, z: this.player.z };
+    return {
+      safe: true,
+      plan,
+      origin,
+      heading: plan.heading,
+      distance: plan.stepDistance,
+      point: {
+        x: origin.x + Math.sin(plan.heading) * plan.stepDistance,
+        z: origin.z + Math.cos(plan.heading) * plan.stepDistance,
+      },
+    };
+  }
+
+  intentMicroStepText(step, target, label = 'Siguiente paso') {
+    if (!step.safe) {
+      return `Detente un momento: no detecto un paso seguro hacia ${target.label}. Volveré a calcular la ruta.`;
+    }
+    const plan = step.plan;
+    const turn = plan.turn === 'straight'
+      ? 'sigue al frente'
+      : plan.turnAngle > 0.95
+        ? `gira a la ${plan.turn}`
+        : `gira ligeramente a la ${plan.turn}`;
+    return `${label}: ${turn} y avanza ${fmtDist(step.distance)} hacia ${target.label}.`;
+  }
+
+  intentMicroStepReached(step) {
+    if (!step?.safe) return false;
+    if (this.distanceTo(step.point) <= 0.32) return true;
+    const dx = this.player.x - step.origin.x;
+    const dz = this.player.z - step.origin.z;
+    const progress = dx * Math.sin(step.heading) + dz * Math.cos(step.heading);
+    return progress >= step.distance - 0.18;
+  }
+
   updateRisk(dt, sensor) {
     this.riskTimer += dt;
     if (this.riskTimer < 0.18) return;
     this.riskTimer = 0;
+
+    // Recalcular el siguiente rumbo seguro en segundo plano, con destino o
+    // siguiendo la dirección de exploración libre, sin generar voz por ello.
+    const motion = this.movementHeading();
+    const routeGoal = this.intentGoal && !this.intentGoal.arrived
+      ? this.intentGoal.route[this.intentGoal.index]
+      : null;
+    const xrHeading = this.renderer?.xr?.isPresenting && this.xrMode === 'vr';
+    const baseHeading = xrHeading ? this.player.yaw : motion.moving ? motion.heading : this.viewYaw;
+    this.tutor.routePlan = this.computeOptimalRouteStep(baseHeading, routeGoal, this.lidar.scan);
+
     if (!this.lidarEnabled) return;
     if (this.intro.active) return;
     if (performance.now() < this.riskArmAt) return;
@@ -2226,7 +2389,6 @@ class App {
     if (this.intentPromptOpen) return;
 
     const scan = this.lidar.scan;
-    const motion = this.movementHeading();
     const tutor = this.tutor;
     const now = performance.now();
     const headingDelta = Math.abs(wrapAngle(motion.heading - (tutor.lastHeading ?? motion.heading)));
@@ -2308,37 +2470,45 @@ class App {
     if (nearest.lateral > 0.06) turn = 'left';
     else if (nearest.lateral < -0.06) turn = 'right';
     else turn = (lateralLeft?.distance ?? Infinity) >= (lateralRight?.distance ?? Infinity) ? 'left' : 'right';
+    const routePlan = tutor.routePlan;
+    if (routePlan?.safe && routePlan.turn !== 'straight') turn = routePlan.turn;
     const turnWord = turn === 'right' ? 'derecha' : 'izquierda';
     const prefix = this.pathDirectionPhrase(motion);
     const obstacle = this.presentObstacle(nearest.label);
     const definiteObstacle = this.definiteObstacle(nearest.label);
+    const targetWaypoint = this.intentGoal && !this.intentGoal.arrived
+      ? this.intentGoal.route[this.intentGoal.index]
+      : null;
     const zoneName = (this.zone || '').toLowerCase();
-    const passage = zoneName.includes('pasillo')
+    const passage = targetWaypoint?.label || (zoneName.includes('pasillo')
       ? 'el pasillo'
       : zoneName.includes('corredor')
         ? 'el corredor'
-        : 'el lado libre';
+        : 'el lado libre');
+    const routeLead = routePlan?.safe && routePlan.turn !== 'straight'
+      ? `Paso libre a la ${turnWord}. `
+      : '';
     let recommendation;
-    if (wall) {
+    if (!routePlan?.safe) {
+      recommendation = 'Detente un momento: no detecto un paso seguro inmediato. El LiDAR vuelve a calcular la ruta.';
+    } else if (wall && routePlan.turn === 'straight') {
+      recommendation = 'No avances hacia la pared; espera la siguiente indicación del LiDAR.';
+    } else if (wall) {
       recommendation = motion.moving
-        ? critical
-          ? `Reduce el paso y gira ligeramente a la ${turnWord} hacia ${passage} para pasar junto a la pared.`
-          : `Gira ligeramente a la ${turnWord} hacia ${passage} y avanza en paralelo a la pared.`
-        : critical
-          ? `No avances todavía: gira ligeramente a la ${turnWord} hacia ${passage} para dejar la pared a un lado.`
-          : `Antes de avanzar, gira ligeramente a la ${turnWord} hacia ${passage} para pasar junto a la pared.`;
+        ? `Gira ligeramente a la ${turnWord} hacia ${passage} y avanza ${fmtDist(routePlan.stepDistance)} en paralelo a la pared.`
+        : `Antes de avanzar, gira a la ${turnWord} hacia ${passage} y da un paso corto junto a la pared.`;
+    } else if (routePlan.turn === 'straight') {
+      recommendation = `Mantén el rumbo y avanza solo ${fmtDist(routePlan.stepDistance)}; volveré a calcular el siguiente paso.`;
+    } else if (critical && motion.moving && motion.z < -0.55) {
+      recommendation = `Reduce el paso y gira a la ${turnWord} para no retroceder contra ${definiteObstacle}.`;
     } else if (critical) {
-      recommendation = motion.moving
-        ? motion.z < -0.55
-          ? `Reduce el paso y gira ligeramente a la ${turnWord} para no retroceder contra ${definiteObstacle}.`
-          : `Reduce el paso y da un paso a la ${turnWord} para evitar ${definiteObstacle}.`
-        : `No avances todavía: desplázate a la ${turnWord} para pasar por el lado libre de ${definiteObstacle}.`;
+      recommendation = `Da un paso corto a la ${turnWord} (${fmtDist(routePlan.stepDistance)}) para evitar ${definiteObstacle}.`;
     } else if (motion.moving) {
-      recommendation = `Gira ligeramente a la ${turnWord} hacia ${passage} para rodear ${definiteObstacle}.`;
+      recommendation = `Gira ligeramente a la ${turnWord} y avanza ${fmtDist(routePlan.stepDistance)} hacia ${passage} para rodear ${definiteObstacle}.`;
     } else {
-      recommendation = `Antes de avanzar, desplázate a la ${turnWord} para pasar por el lado libre de ${definiteObstacle}.`;
+      recommendation = `Antes de avanzar, desplázate ${fmtDist(routePlan.stepDistance)} a la ${turnWord} para pasar por el lado libre de ${definiteObstacle}.`;
     }
-    const text = `${prefix} tienes ${obstacle}, a ${fmtDist(distance)}. ${recommendation}`;
+    const text = `${prefix} tienes ${obstacle}, a ${fmtDist(distance)}. ${routeLead}${recommendation}`;
 
     tutor.lastAt = now;
     tutor.lastLevel = level;
