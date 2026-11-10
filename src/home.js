@@ -239,12 +239,14 @@ export function createHomeEnvironment() {
   };
 
   const addCollider = (cx, cz, w, d, pad = 0) => {
-    colliders.push({
+    const collider = {
       minX: cx - w / 2 - pad,
       maxX: cx + w / 2 + pad,
       minZ: cz - d / 2 - pad,
       maxZ: cz + d / 2 + pad,
-    });
+    };
+    colliders.push(collider);
+    return collider;
   };
 
   const addWall = (cx, cz, w, d, { mat = wallMat, height = H, base = true } = {}) => {
@@ -252,7 +254,9 @@ export function createHomeEnvironment() {
     mesh.userData.obstacleLabel = 'Pared';
     targets.push(mesh);
     obstacles.push({ mesh, label: 'Pared', low: false, labelOffset: 1 });
-    addCollider(cx, cz, w, d);
+    const collider = addCollider(cx, cz, w, d);
+    collider.label = 'Pared';
+    collider.low = false;
     if (base) {
       addMesh(new THREE.BoxGeometry(w + 0.02, 0.1, d + 0.02), baseMat, cx, 0.05, cz);
     }
@@ -372,7 +376,9 @@ export function createHomeEnvironment() {
     group.add(obj);
     targets.push(obj);
     obstacles.push({ mesh: obj, label, low, labelOffset });
-    addCollider(cx ?? obj.position.x, cz ?? obj.position.z, w, d, pad);
+    const collider = addCollider(cx ?? obj.position.x, cz ?? obj.position.z, w, d, pad);
+    collider.label = label;
+    collider.low = low;
     return obj;
   };
 

@@ -64,18 +64,24 @@ export function createEnvironment(kind = 'corridor') {
   };
 
   const addCollider = (cx, cz, w, d, pad = 0) => {
-    colliders.push({
+    const collider = {
       minX: cx - w / 2 - pad,
       maxX: cx + w / 2 + pad,
       minZ: cz - d / 2 - pad,
       maxZ: cz + d / 2 + pad,
-    });
+    };
+    colliders.push(collider);
+    return collider;
   };
 
   const addWall = (cx, cz, w, d, { collider = true, base = true, height = H } = {}) => {
     const mesh = addBoxMesh(new THREE.BoxGeometry(w, height, d), wallMat, cx, height / 2, cz);
     targets.push(mesh);
-    if (collider) addCollider(cx, cz, w, d);
+    if (collider) {
+      const c = addCollider(cx, cz, w, d);
+      c.label = 'Pared';
+      c.low = false;
+    }
     if (base) {
       const bb = new THREE.Mesh(new THREE.BoxGeometry(w + 0.014, 0.15, d + 0.014), baseMat);
       bb.position.set(cx, 0.075, cz);
@@ -91,7 +97,9 @@ export function createEnvironment(kind = 'corridor') {
     targets.push(mesh);
     obstacles.push({ mesh, label, low, labelOffset });
     const box = new THREE.Box3().setFromObject(mesh);
-    addCollider((box.min.x + box.max.x) / 2, (box.min.z + box.max.z) / 2, box.max.x - box.min.x, box.max.z - box.min.z, pad);
+    const collider = addCollider((box.min.x + box.max.x) / 2, (box.min.z + box.max.z) / 2, box.max.x - box.min.x, box.max.z - box.min.z, pad);
+    collider.label = label;
+    collider.low = low;
   };
 
   const addLabel = (text, x, y, z, { scale = 1, color = '#bfeee9' } = {}) => {
@@ -320,7 +328,9 @@ export function createEnvironment(kind = 'corridor') {
     group.add(col);
     targets.push(col);
     obstacles.push({ mesh: col, label: 'Columna', low: false, labelOffset: 1.2 });
-    addCollider(x, z, radius * 2, radius * 2);
+    const collider = addCollider(x, z, radius * 2, radius * 2);
+    collider.label = 'Columna';
+    collider.low = false;
     // Zócalo metálico
     const ring = new THREE.Mesh(new THREE.CylinderGeometry(radius + 0.035, radius + 0.05, 0.12, 28), darkMetal);
     ring.position.set(x, 0.06, z);

@@ -12,8 +12,8 @@ import {
 } from './utils.js';
 
 /**
- * Construye el conjunto digital: maniquí + arnés de pecho + caja AURA +
- * cámara frontal + LiDAR ToF RPLIDAR C1.
+ * Construye el conjunto digital: avatar humanoide + arnés de pecho +
+ * caja AURA + cámara frontal + LiDAR ToF RPLIDAR C1.
  * Sistema local: origen en los pies, +Z al frente, +Y arriba.
  */
 export function createAuraRig() {
@@ -49,13 +49,13 @@ export function createAuraRig() {
   });
 
   const trouser = new THREE.MeshStandardMaterial({
-    color: 0x282b33,
+    color: 0x2c3039,
     roughness: 0.94,
     metalness: 0.02,
   });
 
-  const hairMat = new THREE.MeshStandardMaterial({ color: 0x231a15, roughness: 0.72, metalness: 0.05 });
-  const shoeMat = new THREE.MeshStandardMaterial({ color: 0x15171c, roughness: 0.55, metalness: 0.1 });
+  const hairMat = new THREE.MeshStandardMaterial({ color: 0x2a1d17, roughness: 0.78, metalness: 0.03 });
+  const shoeMat = new THREE.MeshStandardMaterial({ color: 0x24272e, roughness: 0.62, metalness: 0.08 });
   const lipMat = new THREE.MeshStandardMaterial({ color: 0x9c5d55, roughness: 0.5 });
   const eyeLine = new THREE.MeshStandardMaterial({ color: 0x38281f, roughness: 0.65 });
   const caneWhite = new THREE.MeshStandardMaterial({ color: 0xe9ebf0, roughness: 0.42, metalness: 0.18 });
@@ -130,45 +130,78 @@ export function createAuraRig() {
   const greenLED = new THREE.MeshBasicMaterial({ color: 0x74ffb4, toneMapped: false });
   const cyanEmissive = new THREE.MeshBasicMaterial({ color: 0x3ee0d0, toneMapped: false });
 
-  /* ---------------- Maniquí ---------------- */
+  /* ---------------- Avatar humanoide ---------------- */
   const body = new THREE.Group();
-  body.name = 'Mannequin';
+  body.name = 'AuraAvatar';
+  body.userData.anatomy = 'stylized-human';
   root.add(body);
 
-  // Torso
+  // Torso con cintura, caja torácica y cadera: el perfil estrecha en la
+  // cintura, se abre en el pecho y vuelve a cerrarse en los hombros.
   const profile = [
-    [0.0, 0.0],
-    [0.15, 0.0],
-    [0.162, 0.05],
-    [0.17, 0.14],
-    [0.184, 0.26],
-    [0.19, 0.36],
-    [0.178, 0.45],
-    [0.15, 0.5],
-    [0.105, 0.55],
-    [0.055, 0.575],
-    [0.0, 0.585],
+    [0.0, 0.99],
+    [0.158, 0.99],
+    [0.17, 1.012],
+    [0.176, 1.045],
+    [0.174, 1.075],
+    [0.163, 1.105],
+    [0.153, 1.145],
+    [0.151, 1.185],
+    [0.158, 1.23],
+    [0.173, 1.275],
+    [0.19, 1.32],
+    [0.197, 1.355],
+    [0.195, 1.39],
+    [0.186, 1.425],
+    [0.168, 1.455],
+    [0.13, 1.485],
+    [0.084, 1.51],
+    [0.0, 1.535],
   ].map(([r, y]) => new THREE.Vector2(r, y));
-  const torsoGeo = new THREE.LatheGeometry(profile, 44);
+  const torsoGeo = new THREE.LatheGeometry(profile, 52);
   const torso = new THREE.Mesh(torsoGeo, shirt);
-  torso.scale.set(1.02, 1, 0.76);
-  torso.position.y = 0.94;
+  torso.scale.set(1.035, 1, 0.74);
   torso.castShadow = true;
   torso.receiveShadow = true;
   body.add(torso);
 
-  // Pelvis
-  const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.155, 28, 20), trouser);
-  pelvis.scale.set(1.05, 0.75, 0.85);
-  pelvis.position.y = 0.94;
+  // Pectorales suaves bajo la camiseta: dan volumen anatómico al pecho
+  // sin convertirlo en una superficie dura de escaparate.
+  for (const s of [-1, 1]) {
+    const pec = new THREE.Mesh(new THREE.SphereGeometry(0.078, 20, 14), shirt);
+    pec.scale.set(0.92, 0.58, 0.42);
+    pec.position.set(0.062 * s, 1.34, 0.112);
+    pec.castShadow = true;
+    body.add(pec);
+  }
+
+  // Pelvis y caderas
+  const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.15, 30, 22), trouser);
+  pelvis.scale.set(1.02, 0.56, 0.78);
+  pelvis.position.y = 0.935;
   pelvis.castShadow = true;
   body.add(pelvis);
 
-  // Hombros
   for (const s of [-1, 1]) {
-    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.078, 22, 16), shirt);
-    shoulder.scale.set(1, 0.92, 0.9);
-    shoulder.position.set(0.177 * s, 1.435, 0);
+    const hip = new THREE.Mesh(new THREE.SphereGeometry(0.082, 20, 14), trouser);
+    hip.scale.set(0.95, 0.62, 0.9);
+    hip.position.set(0.086 * s, 0.965, -0.01);
+    hip.castShadow = true;
+    body.add(hip);
+  }
+
+  // Pretina de los pantalones: ordena la transición bajo la camiseta.
+  const waistband = new THREE.Mesh(new RoundedBoxGeometry(0.305, 0.042, 0.225, 3, 0.015), trouser);
+  waistband.position.set(0, 0.985, -0.004);
+  waistband.castShadow = true;
+  body.add(waistband);
+
+  // Hombros con pendiente natural (no dos bolas pegadas al torso).
+  for (const s of [-1, 1]) {
+    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.076, 24, 16), shirt);
+    shoulder.scale.set(1.08, 0.72, 0.9);
+    shoulder.position.set(0.18 * s, 1.432, -0.002);
+    shoulder.rotation.z = -0.13 * s;
     shoulder.castShadow = true;
     body.add(shoulder);
   }
@@ -196,26 +229,32 @@ export function createAuraRig() {
     headGroup.add(ear);
   }
 
-  // Cabello
-  const hairCap = new THREE.Mesh(
-    new THREE.SphereGeometry(0.111, 28, 18, 0, Math.PI * 2, 0, 1.18),
-    hairMat
-  );
-  hairCap.scale.set(0.98, 1.05, 1.02);
-  hairCap.position.set(0, 0.076, 0.0);
-  hairCap.castShadow = true;
-  headGroup.add(hairCap);
-
-  const hairBack = new THREE.Mesh(new THREE.SphereGeometry(0.086, 20, 14), hairMat);
-  hairBack.scale.set(0.96, 0.98, 0.7);
-  hairBack.position.set(0, 0.05, -0.062);
-  headGroup.add(hairBack);
-
-  const quiff = new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 10), hairMat);
-  quiff.scale.set(1.35, 0.42, 0.62);
-  quiff.position.set(0, 0.163, 0.055);
-  quiff.rotation.x = 0.25;
-  headGroup.add(quiff);
+  // Cabello continuo: una sola malla esférica con la zona de la cara
+  // hundida dentro del cráneo. Así queda una línea de pelo natural, sin
+  // casquete ni parche circular, y la nuca se estrecha suavemente.
+  const hairGeo = new THREE.SphereGeometry(1, 48, 32);
+  {
+    const pos = hairGeo.attributes.position;
+    const v = new THREE.Vector3();
+    const n = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      n.copy(v).normalize();
+      // Altura de la línea del pelo: alta en la frente, media en las
+      // sienes y baja en la nuca. Las zonas por debajo se hunden dentro
+      // del cráneo para que no se vea una calota rígida.
+      const frontness = THREE.MathUtils.smoothstep(n.z, -0.2, 0.2);
+      const hairline = THREE.MathUtils.lerp(-0.28, 0.64, frontness) + 0.18 * Math.abs(n.x) - 0.12 * (1 - frontness) * (1 - Math.abs(n.x));
+      if (n.y < hairline) v.multiplyScalar(0.7);
+      pos.setXYZ(i, v.x, v.y, v.z);
+    }
+    hairGeo.computeVertexNormals();
+  }
+  const hairShell = new THREE.Mesh(hairGeo, hairMat);
+  hairShell.scale.set(0.104, 0.119, 0.107);
+  hairShell.position.set(0, 0.075, -0.002);
+  hairShell.castShadow = true;
+  headGroup.add(hairShell);
 
   for (const s of [-1, 1]) {
     const sideburn = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.036, 0.03), hairMat);
@@ -313,47 +352,74 @@ export function createAuraRig() {
   collar.position.y = 1.527;
   body.add(collar);
 
-  // Brazos con pivotes para animación
+  // Brazos con pivotes para animación: hombro, codo, muñeca y mano
+  // segmentada. La manga cubre el brazo hasta cerca del codo y deja el
+  // antebrazo visible, como una prenda real.
   function makeArm(side) {
     const pivot = new THREE.Group();
-    pivot.position.set(0.196 * side, 1.42, 0);
-    pivot.rotation.z = 0.14 * side;
-    pivot.rotation.x = -0.05;
+    pivot.position.set(0.215 * side, 1.425, 0);
+    pivot.rotation.z = 0.12 * side;
+    pivot.rotation.x = -0.04;
 
-    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.049, 0.19, 6, 14), skinTone);
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.052, 0.19, 8, 16), skinTone);
     upper.position.y = -0.145;
     upper.castShadow = true;
     pivot.add(upper);
 
-    const shoulderCap = new THREE.Mesh(new THREE.SphereGeometry(0.072, 18, 12), shirt);
-    shoulderCap.scale.set(1, 0.95, 0.95);
+    const shoulderCap = new THREE.Mesh(new THREE.SphereGeometry(0.069, 22, 16), shirt);
+    shoulderCap.scale.set(1.02, 0.82, 0.96);
+    shoulderCap.position.y = -0.01;
     pivot.add(shoulderCap);
 
-    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.063, 0.058, 0.16, 16), shirt);
-    sleeve.position.y = -0.08;
+    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.061, 0.052, 0.245, 20), shirt);
+    sleeve.position.y = -0.13;
     sleeve.castShadow = true;
     pivot.add(sleeve);
 
-    const sleeveHem = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.006, 6, 20), shirt);
+    const sleeveHem = new THREE.Mesh(new THREE.TorusGeometry(0.0525, 0.0055, 8, 22), shirt);
     sleeveHem.rotation.x = Math.PI / 2;
-    sleeveHem.position.y = -0.161;
+    sleeveHem.position.y = -0.253;
     pivot.add(sleeveHem);
 
     const elbow = new THREE.Group();
-    elbow.position.y = -0.29;
-    elbow.rotation.x = -0.18;
+    elbow.position.y = -0.3;
+    elbow.rotation.x = -0.16;
     pivot.add(elbow);
 
-    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.041, 0.17, 6, 14), skinTone);
-    fore.position.y = -0.13;
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.043, 0.175, 8, 16), skinTone);
+    fore.position.y = -0.135;
     fore.castShadow = true;
     elbow.add(fore);
 
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.048, 16, 12), skinTone);
-    hand.scale.set(0.72, 1.25, 0.55);
+    const wrist = new THREE.Mesh(new THREE.SphereGeometry(0.037, 16, 12), skinTone);
+    wrist.scale.set(0.82, 0.68, 0.76);
+    wrist.position.y = -0.236;
+    elbow.add(wrist);
+
+    const hand = new THREE.Group();
     hand.position.y = -0.255;
-    hand.castShadow = true;
+    hand.rotation.x = 0.06;
     elbow.add(hand);
+
+    const palm = new THREE.Mesh(new RoundedBoxGeometry(0.054, 0.074, 0.029, 3, 0.012), skinTone);
+    palm.position.y = -0.036;
+    palm.castShadow = true;
+    hand.add(palm);
+
+    // Dedos estilizados: cuatro falanges cortas y un pulgar hacia el torso.
+    for (let i = 0; i < 4; i++) {
+      const finger = new THREE.Mesh(new THREE.CapsuleGeometry(0.0064, 0.031 - i * 0.0025, 4, 8), skinTone);
+      finger.position.set((i - 1.5) * 0.0125, -0.087 - (i === 3 ? 0.004 : 0), 0.001);
+      finger.rotation.x = -0.08;
+      finger.castShadow = true;
+      hand.add(finger);
+    }
+    const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.0072, 0.029, 4, 8), skinTone);
+    thumb.position.set(-0.031 * side, -0.052, 0.012);
+    thumb.rotation.z = -0.62 * side;
+    thumb.rotation.x = -0.28;
+    thumb.castShadow = true;
+    hand.add(thumb);
 
     if (side === 1) {
       // Bastón blanco plegable: seña de identidad de la persona usuaria
@@ -398,8 +464,8 @@ export function createAuraRig() {
     const pivot = new THREE.Group();
     pivot.position.set(0.083 * side, 0.93, 0);
 
-    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.074, 0.25, 6, 16), trouser);
-    thigh.position.y = -0.2;
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.084, 0.23, 8, 18), trouser);
+    thigh.position.y = -0.19;
     thigh.castShadow = true;
     pivot.add(thigh);
 
@@ -407,19 +473,39 @@ export function createAuraRig() {
     knee.position.y = -0.42;
     pivot.add(knee);
 
-    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.056, 0.26, 6, 16), trouser);
-    shin.position.y = -0.19;
+    const kneeCap = new THREE.Mesh(new THREE.SphereGeometry(0.067, 18, 12), trouser);
+    kneeCap.scale.set(0.95, 0.78, 0.92);
+    knee.add(kneeCap);
+
+    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.285, 8, 18), trouser);
+    shin.position.y = -0.2;
     shin.castShadow = true;
     knee.add(shin);
 
-    const foot = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.065, 0.22, 3, 0.025), shoeMat);
-    foot.position.set(0, -0.365, 0.045);
+    const ankle = new THREE.Mesh(new THREE.SphereGeometry(0.056, 16, 12), trouser);
+    ankle.scale.set(0.88, 0.8, 0.92);
+    ankle.position.y = -0.38;
+    knee.add(ankle);
+
+    const foot = new THREE.Mesh(new RoundedBoxGeometry(0.112, 0.074, 0.245, 4, 0.03), shoeMat);
+    foot.position.set(0, -0.47, 0.055);
     foot.castShadow = true;
     knee.add(foot);
 
-    const sole = new THREE.Mesh(new RoundedBoxGeometry(0.104, 0.018, 0.225, 2, 0.008), new THREE.MeshStandardMaterial({ color: 0x0b0c0f, roughness: 0.85 }));
-    sole.position.set(0, -0.398, 0.045);
+    const sole = new THREE.Mesh(new RoundedBoxGeometry(0.117, 0.018, 0.252, 2, 0.008), new THREE.MeshStandardMaterial({ color: 0x0b0c0f, roughness: 0.85 }));
+    sole.position.set(0, -0.49, 0.055);
     knee.add(sole);
+
+    // Talón y empeine redondeados para que el zapato no parezca un bloque.
+    const heel = new THREE.Mesh(new THREE.SphereGeometry(0.054, 14, 10), shoeMat);
+    heel.scale.set(0.95, 0.6, 0.86);
+    heel.position.set(0, -0.452, -0.034);
+    knee.add(heel);
+
+    const toe = new THREE.Mesh(new THREE.SphereGeometry(0.058, 16, 10), shoeMat);
+    toe.scale.set(0.92, 0.55, 0.86);
+    toe.position.set(0, -0.465, 0.145);
+    knee.add(toe);
 
     return { pivot, knee };
   }
@@ -428,16 +514,16 @@ export function createAuraRig() {
   body.add(leftLeg.pivot, rightLeg.pivot);
 
   // Cinturón y dobladillo de la camiseta
-  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.158, 0.012, 8, 40), gripMat);
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.183, 0.012, 8, 40), gripMat);
   belt.rotation.x = Math.PI / 2;
-  belt.scale.set(1, 0.8, 1);
-  belt.position.y = 1.005;
+  belt.scale.set(1, 0.79, 1);
+  belt.position.y = 1.008;
   body.add(belt);
 
-  const hem = new THREE.Mesh(new THREE.TorusGeometry(0.158, 0.009, 8, 40), shirt);
+  const hem = new THREE.Mesh(new THREE.TorusGeometry(0.178, 0.009, 8, 40), shirt);
   hem.rotation.x = Math.PI / 2;
-  hem.scale.set(1.01, 0.78, 1);
-  hem.position.y = 1.025;
+  hem.scale.set(1.01, 0.79, 1);
+  hem.position.y = 0.997;
   body.add(hem);
 
   /* ---------------- Arnés ---------------- */
@@ -914,9 +1000,14 @@ export function createAuraRig() {
 
     const t = time;
     seatBlend += ((seated ? 1 : 0) - seatBlend) * (1 - Math.exp(-8 * dt));
-    // Respiración
-    const breath = Math.sin(t * 1.6) * 0.006;
+    // Respiración y micro-postura: el arnés y la cámara acompañan al torso
+    // con una amplitud mínima para no marear en la vista POV.
+    const breath = Math.sin(t * 1.55) * 0.0065;
+    const microSway = Math.sin(t * 0.57) * 0.006 + Math.sin(t * 1.13 + 0.8) * 0.0025;
     torso.scale.y = 1 + breath;
+    torso.scale.x = 1.035 + breath * 0.22;
+    torso.rotation.z = microSway * 0.55;
+    torso.rotation.y = Math.sin(t * 0.37) * 0.008;
     headGroup.position.y = 1.6 - breath * 0.35;
     headGroup.rotation.y = Math.sin(t * 0.42) * 0.1 * (1 - seatBlend * 0.6);
     headGroup.rotation.x = Math.sin(t * 0.55) * 0.02 - 0.02 + seatBlend * 0.05;
@@ -925,19 +1016,27 @@ export function createAuraRig() {
     const targetAmp = moving ? Math.min(0.75, 0.24 + speed * 0.22) : 0;
     walkPhase += dt * (moving ? 5.2 + speed * 1.5 : 0);
     const swing = Math.sin(walkPhase) * targetAmp;
+    const idleSway = Math.sin(t * 0.8) * 0.012;
     leftLeg.pivot.rotation.x = mix(swing, -1.42, seatBlend);
     rightLeg.pivot.rotation.x = mix(-swing, -1.42, seatBlend);
     leftLeg.knee.rotation.x = mix(Math.max(0, -Math.sin(walkPhase) * 0.55 * targetAmp * 2), 1.44, seatBlend);
     rightLeg.knee.rotation.x = mix(Math.max(0, Math.sin(walkPhase) * 0.55 * targetAmp * 2), 1.44, seatBlend);
-    leftArm.rotation.x = mix(-swing * 0.65 - 0.05, -0.58, seatBlend);
-    rightArm.rotation.x = mix(swing * 0.22 - 0.05, -0.46, seatBlend);
+    leftArm.rotation.x = mix(-swing * 0.65 - 0.05 + idleSway, -0.58, seatBlend);
+    rightArm.rotation.x = mix(swing * 0.22 - 0.05 - idleSway, -0.46, seatBlend);
     leftArm.rotation.z = mix(-0.14, -0.24, seatBlend);
     rightArm.rotation.z = mix(0.14, 0.3, seatBlend);
+
+    // El arnés sube y baja con la respiración; el device lleva la cámara.
+    harness.position.y = breath * 0.42;
+    harness.rotation.z = microSway * 0.35;
+    device.position.y = 1.29 + breath * 0.42;
+    device.rotation.z = microSway * 0.28;
 
     // Bob del cuerpo / descenso al sentarse
     const bob = moving ? Math.abs(Math.sin(walkPhase)) * 0.014 : 0;
     body.position.y = bob * (1 - seatBlend) - 0.46 * seatBlend;
-    body.rotation.z = moving ? Math.sin(walkPhase) * 0.008 * (1 - seatBlend) : 0;
+    body.rotation.z = microSway * 0.32 + (moving ? Math.sin(walkPhase) * 0.008 * (1 - seatBlend) : 0);
+    body.rotation.x = breath * 0.22 * (1 - seatBlend);
 
     // LED parpadeante
     const blink = 0.6 + Math.sin(t * 2.4) * 0.25;

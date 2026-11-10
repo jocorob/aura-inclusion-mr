@@ -83,6 +83,8 @@ export class LidarSystem {
       rear: Infinity,
       frontHit: null,
       nearestHit: null,
+      path: Infinity,
+      pathHit: null,
       contour: [],
       raysCast: 0,
     };
@@ -352,6 +354,8 @@ export class LidarSystem {
     let frontLeft = Infinity;
     let frontRight = Infinity;
     let rear = Infinity;
+    let path = Infinity;
+    let pathHit = null;
     let frontHit = null;
     let nearestHit = null;
     let leftHit = null;
@@ -373,6 +377,15 @@ export class LidarSystem {
       if (dist < min) {
         min = dist;
         nearestHit = h;
+      }
+
+      // Corredor real de avance: solo lo que cae dentro del ancho del
+      // cuerpo y delante se considera un posible bloqueo de rumbo.
+      const forward = Math.cos(a) * dist;
+      const lateral = Math.sin(a) * dist;
+      if (forward > 0.05 && forward < 2.6 && Math.abs(lateral) <= 0.42 && dist < path) {
+        path = dist;
+        pathHit = h;
       }
 
       const absA = Math.abs(a);
@@ -411,6 +424,8 @@ export class LidarSystem {
       frontLeft,
       frontRight,
       rear,
+      path,
+      pathHit,
       frontHit,
       nearestHit,
       leftHit,

@@ -59,7 +59,7 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 - Sectores de riesgo (frente, izquierda, derecha, frente-izquierda/frente-derecha) calculados a **10 Hz** sobre el barrido.
 - Detección de **obstáculos bajos** (bancos, bolardos, macetas) con la cámara simulada.
 - Sensores de **IMU / SLAM** representados en el radar y en la telemetría.
-- El avatar camina, corre y gira con animación procedural de piernas, brazos y bastón.
+- El avatar es un humanoide estilizado de proporciones anatómicas (hombros, cintura, cadera, manos y pies), con ropa y bastón; camina, corre y gira con animación procedural y micro-movimientos de respiración y postura. El arnés va ajustado a la altura del pecho y la cámara POV hereda esos micro-movimientos con interpolación suave.
 
 ### 3. Casa domótica adaptada
 
@@ -77,7 +77,7 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 
 ### 4. Interfaz de voz local (Edge AI)
 
-- **Tutor de movilidad sin fatiga auditiva**: nada de «¡Alto!» ni un aviso por cada paso. AURA nombra los elementos concretos y su lado —*«Al frente tienes una mesa de centro, a 64 centímetros. A tu derecha está el sofá, a 1,5 metros. Gira ligeramente a la izquierda para seguir avanzando.»*— y añade una recomendación de giro o desplazamiento.
+- **Tutor de movilidad sin fatiga auditiva**: nada de «¡Alto!» ni un aviso por cada paso. El tutor solo considera el corredor real de marcha: un objeto junto al costado no genera alarma si la persona puede pasar sin tocarlo, y los objetos a más de 1,30 m no se anuncian como si fueran una colisión inminente. Cuando el rumbo sí está comprometido, nombra el elemento concreto —*«Al frente tienes una mesa de centro, a 48 centímetros. Reduce el paso y corrige el rumbo; el paso está bloqueado.»*— y propone un giro.
 - **Silencio inteligente**: un mismo escenario no se repite mientras el usuario avanza en una dirección segura; solo se vuelve a hablar si cambia el riesgo, si el usuario sigue acercándose tras un espacio de 7 s en riesgo crítico o 15 s en riesgo moderado, o si el camino queda despejado (un único mensaje de confirmación, con 9 s de margen). El diálogo de intenciones no interrumpe un aviso de riesgo y se pospone mientras AURA está hablando.
 - Durante un escaneo o una inspección con el objeto acercado, el tutor baja la voz y deja el protagonismo al reconocimiento de la cámara.
 - Subtítulos sincronizados en el panel **Voz local**, cola de mensajes con prioridad y repetición controlada para no saturar.
@@ -100,7 +100,9 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 
 | Acción | Control |
 |---|---|
-| Caminar | `W` `A` `S` `D` o flechas |
+| Caminar | `W` `A` `S` `D` |
+| Girar el torso y la cámara | `←` `→` (mantener) |
+| Inclinar la cámara | `↑` `↓` (mantener) |
 | Correr | `Shift` (mantener) |
 | Cambiar 3ª persona / POV | `Space` |
 | Encender/apagar LiDAR | `L` |
@@ -125,7 +127,8 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 - La tarjeta contextual ofrece «Escanear con la cámara» y «Acercar …» como botones táctiles; no hace falta teclado.
 - La tarjeta de intenciones permite elegir baño, cocina, nevera o seguir explorando; el objetivo y su distancia quedan visibles junto a la zona.
 - Botones de telemetría y voz en la barra superior.
-- Arrastrar sobre la escena para mirar.
+- Arrastrar sobre la escena para mirar; las flechas del teclado giran el torso y la cámara de forma gradual sin ratón.
+- El D-pad de la barra inferior sigue siendo la locomoción táctil; las flechas físicas no desplazan al avatar.
 
 ### Realidad extendida (WebXR)
 
