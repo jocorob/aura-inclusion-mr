@@ -1241,7 +1241,11 @@ class App {
 
     scan.summary = this.buildScanSummary(scan.items.map((entry) => entry.item));
     this.hud.showScan('Escaneo completado', `${scan.items.length} objetos · F para acercar`, { autoHide: 2800 });
-    this.speak(`${scan.summary} ${scan.items.length === 1 ? 'Pulsa F para acercarlo.' : 'Pulsa F para acercar el primero.'}`, { priority: 2, log: true });
+    this.speak(`${scan.summary} ${scan.items.length === 1 ? 'Pulsa F para acercarlo.' : 'Pulsa F para acercar el primero.'}`, {
+      priority: 2,
+      log: true,
+      interruptible: false,
+    });
   }
 
   buildScanSummary(items) {
@@ -1357,7 +1361,11 @@ class App {
     this.hud.showScan('Objeto acercado', `${item.name} · F para devolver`, { mode: 'held' });
     const title = item.title || item.name;
     const detail = item.detail || item.voice || 'Lo tienes delante de la cámara.';
-    this.speak(`Tienes «${title}» delante de la cámara. ${detail} Pulsa F para devolverlo.`, { priority: 3, log: true });
+    this.speak(`Tienes «${title}» delante de la cámara. ${detail} Pulsa F para devolverlo.`, {
+      priority: 3,
+      log: true,
+      interruptible: false,
+    });
   }
 
   returnHeld({ silent = false } = {}) {
@@ -1610,7 +1618,11 @@ class App {
     this.contextTimer = 1;
     this.hud.toast(`${product.name} · ${product.level}`, 3000);
     this.hud.showScan('Producto seleccionado', `${product.name} · F para acercarlo`, { autoHide: 2600 });
-    this.speak(`${product.title || product.name}. ${product.detail || product.voice}`, { priority: 2, log: true });
+    this.speak(`${product.title || product.name}. ${product.detail || product.voice}`, {
+      priority: 2,
+      log: true,
+      interruptible: false,
+    });
   }
 
   interact() {
@@ -2207,9 +2219,10 @@ class App {
     if (this.intro.active) return;
     if (performance.now() < this.riskArmAt) return;
     if (this.lidar.cycles < 1) return;
-    // Durante un escaneo o una inspección el usuario está quieto y la voz
-    // principal es la de la cámara; no se añaden avisos de proximidad.
-    if ((this.scan || this.held) && this.speed < 0.2) return;
+    // No competir con una descripción protegida del usuario ni con el barrido
+    // POV activo. El riesgo se reevalúa al terminar la locución/escaneo.
+    if (this.voice.current?.interruptible === false) return;
+    if ((this.scan && !this.scan.done) || ((this.scan || this.held) && this.speed < 0.2)) return;
     if (this.intentPromptOpen) return;
 
     const scan = this.lidar.scan;
@@ -2263,13 +2276,14 @@ class App {
 
     const signature = `${level}|${nearest?.label || ''}|${Math.sign(nearest?.lateral || 0)}`;
     if (level === 'clear') {
+      // Al despejarse el paso se rearma el tutor sin emitir una confirmación
+      // genérica. El cooldown evita nuevas instrucciones demasiado seguidas.
       if (tutor.warned && now - tutor.lastAt > 1200 && now - tutor.lastClearAt > 9000) {
         tutor.warned = false;
         tutor.lastClearAt = now;
         tutor.lastAt = now;
         tutor.lastLevel = 'clear';
         tutor.lastSignature = '';
-        this.speak('Camino despejado. Puedes continuar con tranquilidad.', { priority: 1, log: true });
       }
       return;
     }
@@ -2297,17 +2311,32 @@ class App {
     const turnWord = turn === 'right' ? 'derecha' : 'izquierda';
     const prefix = this.pathDirectionPhrase(motion);
     const obstacle = this.presentObstacle(nearest.label);
+    const definiteObstacle = this.definiteObstacle(nearest.label);
+    const zoneName = (this.zone || '').toLowerCase();
+    const passage = zoneName.includes('pasillo')
+      ? 'el pasillo'
+      : zoneName.includes('corredor')
+        ? 'el corredor'
+        : 'el lado libre';
     let recommendation;
-    if (critical) {
-      recommendation = motion.z < -0.55
-        ? 'Reduce el paso y corrige el rumbo para no retroceder contra el obstáculo.'
-        : 'Reduce el paso y corrige el rumbo; el paso está bloqueado.';
-    } else if (motion.moving && wall) {
-      recommendation = `Gira ligeramente a la ${turnWord} para continuar en paralelo al muro.`;
+    if (wall) {
+      recommendation = motion.moving
+        ? critical
+          ? `Reduce el paso y gira ligeramente a la ${turnWord} hacia ${passage} para pasar junto a la pared.`
+          : `Gira ligeramente a la ${turnWord} hacia ${passage} y avanza en paralelo a la pared.`
+        : critical
+          ? `No avances todavía: gira ligeramente a la ${turnWord} hacia ${passage} para dejar la pared a un lado.`
+          : `Antes de avanzar, gira ligeramente a la ${turnWord} hacia ${passage} para pasar junto a la pared.`;
+    } else if (critical) {
+      recommendation = motion.moving
+        ? motion.z < -0.55
+          ? `Reduce el paso y gira ligeramente a la ${turnWord} para no retroceder contra ${definiteObstacle}.`
+          : `Reduce el paso y da un paso a la ${turnWord} para evitar ${definiteObstacle}.`
+        : `No avances todavía: desplázate a la ${turnWord} para pasar por el lado libre de ${definiteObstacle}.`;
     } else if (motion.moving) {
-      recommendation = `Gira ligeramente a la ${turnWord} para rodearlo.`;
+      recommendation = `Gira ligeramente a la ${turnWord} hacia ${passage} para rodear ${definiteObstacle}.`;
     } else {
-      recommendation = 'Puedes mantener la posición y elegir otro rumbo antes de avanzar.';
+      recommendation = `Antes de avanzar, desplázate a la ${turnWord} para pasar por el lado libre de ${definiteObstacle}.`;
     }
     const text = `${prefix} tienes ${obstacle}, a ${fmtDist(distance)}. ${recommendation}`;
 
@@ -2343,7 +2372,7 @@ class App {
     }
   }
 
-  speak(text, { priority = 1, log = true, level = 'info' } = {}) {
+  speak(text, { priority = 1, log = true, level = 'info', interruptible = true } = {}) {
     if (!text) return;
     if (log) this.hud.log(text, level);
     this.telemetry.pulse('tts', 1200);
@@ -2354,7 +2383,7 @@ class App {
     }
     // La voz decide si arranca o espera en cola; el HUD se actualiza con la
     // frase que realmente empieza a sonar (onStart).
-    this.voice.speak(text, { priority });
+    this.voice.speak(text, { priority, interruptible });
   }
 
   ask(kind) {
@@ -2417,8 +2446,7 @@ class App {
         answer = `Estás en ${this.zone}. Detecto ${count} puntos de contacto en menos de cuatro metros y medio. El obstáculo más próximo está a ${fmtDist(nearest)}.`;
       }
     }
-    this.hud.log(answer, 'info');
-    this.speak(answer, { priority: 3 });
+    this.speak(answer, { priority: 3, interruptible: false });
   }
 
   /* ================= XR ================= */
