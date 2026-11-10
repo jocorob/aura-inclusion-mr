@@ -90,9 +90,12 @@ export class VoiceSystem {
     if (this.queue.some((queued) => queued.text === item.text)) return true;
     item.order = ++this.queueOrder;
     this.queue.push(item);
-    // La cola nunca crece sin límite: primero se descarta lo prescindible.
+    // La cola nunca crece sin límite: primero se descarta lo prescindible,
+    // sin eliminar una descripción protegida mientras haya otra opción.
     if (this.queue.length > 8) {
-      let drop = this.queue.findIndex((queued) => queued.priority < 3);
+      let drop = this.queue.findIndex((queued) => queued.interruptible && queued.priority < 3);
+      if (drop < 0) drop = this.queue.findIndex((queued) => queued.interruptible);
+      if (drop < 0) drop = this.queue.findIndex((queued) => queued.priority < 3);
       if (drop < 0) drop = 0;
       this.queue.splice(drop, 1);
     }
@@ -170,17 +173,18 @@ export class VoiceSystem {
 
   /**
    * @param {string} text
-   * @param {{priority?: number, onDone?: Function}} options
+   * @param {{priority?: number, onDone?: Function, interruptible?: boolean}} options
    */
-  speak(text, { priority = 1, onDone } = {}) {
+  speak(text, { priority = 1, onDone, interruptible = true } = {}) {
     if (!text || !this.enabled) return false;
-    const item = { text, priority, onDone, order: 0 };
+    const item = { text, priority, onDone, interruptible, order: 0 };
 
     if (this.speaking) {
-      // Lo crítico manda de inmediato. Un aviso de prioridad 2 puede cortar
-      // una frase informativa, pero nunca otra frase de escaneo o un crítico.
-      const canInterrupt = priority >= 3
-        || (priority > this.currentPriority && this.currentPriority < 2);
+      // Una descripción marcada como protegida termina sin cortes. En los
+      // demás casos, lo crítico manda; prioridad 2 puede cortar información.
+      const canInterrupt = this.current?.interruptible !== false
+        && (priority >= 3
+          || (priority > this.currentPriority && this.currentPriority < 2));
       if (!canInterrupt) return this._enqueue(item);
 
       this.token += 1;
