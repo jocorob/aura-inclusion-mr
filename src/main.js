@@ -1208,7 +1208,9 @@ class App {
     this.viewYaw = scan.baseYaw;
     this.viewPitch = scan.target.finalPitch
       ?? (scan.target.type === 'fridge' ? -0.6 : scan.target.type === 'table' ? -0.45 : -0.3);
-    this.updateCamera(1 / 60, true);
+    // El encuadre final se asienta con la misma amortiguación que el barrido;
+    // así no hay un salto seco al terminar de reconocer la superficie.
+    this.updateCamera(1 / 60);
     this.contextMuted = null;
     this.contextTimer = 1;
 
