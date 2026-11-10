@@ -93,7 +93,7 @@ class App {
     this.lastBatteryAlert = 0;
     this.risk = 'clear';
     this.riskTimer = 0;
-    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false };
+    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false, lastHeading: 2.0, lastWallAt: 0 };
     this.sonarTimer = 0;
     this.fpsFrames = 0;
     this.fpsTime = 0;
@@ -148,6 +148,7 @@ class App {
 
     this.tmpVec = new THREE.Vector3();
     this.tmpVec2 = new THREE.Vector3();
+    this.sensorWorld = new THREE.Vector3();
     this.camRay = new THREE.Raycaster();
 
     this.initRenderer();
@@ -705,7 +706,7 @@ class App {
     this.rig.root.visible = true;
     this.contextMuted = null;
     this.contextCurrentId = null;
-    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false };
+    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false, lastHeading: 2.0, lastWallAt: 0 };
     this.risk = 'clear';
     this.intentPrompted = false;
     this.homeSince = performance.now();
@@ -754,7 +755,7 @@ class App {
     this.fridgeSelected = null;
     this.env.setFridgeOpen?.(false);
     this.contextMuted = null;
-    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false };
+    this.tutor = { lastAt: 0, lastSignature: '', lastLevel: 'clear', lastClearAt: 0, warned: false, lastHeading: 2.0, lastWallAt: 0 };
     this.risk = 'clear';
     this.hud.hideContext();
     if (wasSeated && this.preSitCamera === 'third') {
@@ -2128,34 +2129,66 @@ class App {
   /**
    * Comprueba si el corredor que ocupa el cuerpo (radio + margen) está
    * bloqueado en el rumbo real de marcha. Un objeto junto al costado no
-   * cuenta si la persona puede pasar sin tocarlo.
+   * cuenta si la persona puede pasar sin tocarlo; las distancias parten del
+   * origen real del LiDAR, en la cara frontal del arnés.
    */
   pathBlockAt(heading, halfWidth = 0.41, maxDistance = 1.6) {
     const fx = Math.sin(heading);
     const fz = Math.cos(heading);
     const rx = Math.cos(heading);
     const rz = -Math.sin(heading);
+    // Punto real del sensor en la cara frontal del arnés.
+    const sensor = this.rig?.lidarAnchor
+      ? this.rig.lidarAnchor.getWorldPosition(this.sensorWorld)
+      : this.sensorWorld.set(this.player.x, 0, this.player.z);
     let best = null;
     for (const collider of this.env.colliders || []) {
-      const cx = (collider.minX + collider.maxX) * 0.5;
-      const cz = (collider.minZ + collider.maxZ) * 0.5;
       const hx = Math.max(0.01, (collider.maxX - collider.minX) * 0.5);
       const hz = Math.max(0.01, (collider.maxZ - collider.minZ) * 0.5);
+      const cx = (collider.minX + collider.maxX) * 0.5;
+      const cz = (collider.minZ + collider.maxZ) * 0.5;
       const dx = cx - this.player.x;
       const dz = cz - this.player.z;
       const forward = dx * fx + dz * fz;
-      const lateral = dx * rx + dz * rz;
-      const halfForward = Math.abs(fx) * hx + Math.abs(fz) * hz;
-      const halfLateral = Math.abs(rx) * hx + Math.abs(rz) * hz;
-      if (forward + halfForward < 0.04) continue;
-      if (Math.abs(lateral) > halfWidth + halfLateral) continue;
-      const distance = Math.max(0.04, forward - halfForward);
-      if (distance > maxDistance) continue;
-      if (!best || distance < best.distance) {
-        best = { distance, label: collider.label || 'Pared', lateral, low: Boolean(collider.low) };
+      if (forward + Math.abs(fx) * hx + Math.abs(fz) * hz < 0.04) continue;
+
+      // Punto del AABB más cercano al cuerpo y al arnés. Así la distancia
+      // hablada es la separación física real, no una proyección conservadora.
+      const nearestX = Math.max(collider.minX, Math.min(this.player.x, collider.maxX));
+      const nearestZ = Math.max(collider.minZ, Math.min(this.player.z, collider.maxZ));
+      const lateral = (nearestX - this.player.x) * rx + (nearestZ - this.player.z) * rz;
+      if (Math.abs(lateral) > halfWidth) continue;
+      const distance = Math.hypot(nearestX - this.player.x, nearestZ - this.player.z);
+      if (distance > maxDistance + 0.3) continue;
+      const sensorX = Math.max(collider.minX, Math.min(sensor.x, collider.maxX));
+      const sensorZ = Math.max(collider.minZ, Math.min(sensor.z, collider.maxZ));
+      const sensorDistance = Math.max(0.03, Math.hypot(sensorX - sensor.x, sensorZ - sensor.z));
+      if (!best || sensorDistance < best.sensorDistance) {
+        best = {
+          distance,
+          sensorDistance,
+          label: collider.label || 'Pared',
+          lateral,
+          low: Boolean(collider.low),
+          hx,
+          hz,
+        };
       }
     }
     return best;
+  }
+
+  /**
+   * Una pared lateral tiene su normal apuntando al costado del rumbo. Solo
+   * una pared cuya cara mira de frente al recorrido puede generar un aviso.
+   */
+  wallIsFrontal(block, heading) {
+    if (!block || block.label !== 'Pared') return false;
+    const fx = Math.abs(Math.sin(heading));
+    const fz = Math.abs(Math.cos(heading));
+    // Una pared larga en X tiene su cara ancha mirando a Z; una pared larga
+    // en Z la tiene mirando a X. Es frontal solo si el rumbo va contra esa cara.
+    return block.hx >= block.hz ? fz >= fx : fx >= fz;
   }
 
   pathDirectionPhrase(motion) {
@@ -2181,30 +2214,53 @@ class App {
 
     const scan = this.lidar.scan;
     const motion = this.movementHeading();
-    const block = this.pathBlockAt(motion.heading);
-    // El LiDAR solo se usa como refuerzo del corredor: sus rayos viajan a
-    // 1,42 m y no ven mesas bajas, pero sí paredes y muebles altos.
-    const lidarPath = Number.isFinite(scan.path) ? scan.path : Infinity;
-    const lidarBlock = lidarPath < 1.35 && (!block || lidarPath < block.distance)
-      ? { distance: lidarPath, label: scan.pathHit?.label || 'Pared', lateral: 0 }
-      : null;
-    const nearest = !block ? lidarBlock : !lidarBlock ? block : (lidarBlock.distance < block.distance ? lidarBlock : block);
-    const distance = nearest ? nearest.distance : Infinity;
+    const tutor = this.tutor;
+    const now = performance.now();
+    const headingDelta = Math.abs(wrapAngle(motion.heading - (tutor.lastHeading ?? motion.heading)));
+    tutor.lastHeading = motion.heading;
+    const abruptTurn = headingDelta > 0.5;
 
+    let block = this.pathBlockAt(motion.heading);
+    let wallFrontal = false;
+    if (block?.label === 'Pared') {
+      wallFrontal = this.wallIsFrontal(block, motion.heading);
+      const recentlyWarned = now - tutor.lastWallAt < 12000;
+      // Una pared paralela al rumbo no es un obstáculo: forma parte del
+      // pasillo. Se ignora salvo giro brusco hacia ella o aviso reciente
+      // a menos de medio metro. Las paredes lejanas tampoco se narran.
+      if ((!wallFrontal && !abruptTurn)
+        || (block.sensorDistance > 1.02 && !abruptTurn)
+        || (recentlyWarned && block.sensorDistance >= 0.4)) {
+        block = null;
+      }
+    }
+
+    // El corredor de colisión ya etiqueta las paredes. El LiDAR refuerza
+    // obstáculos no estructurales para no resucitar paredes laterales.
+    const lidarPath = Number.isFinite(scan.path) ? scan.path : Infinity;
+    const lidarLabel = scan.pathHit?.label || '';
+    const lidarBlock = lidarPath < 1.25 && lidarLabel && lidarLabel !== 'Pared'
+      && (!block || lidarPath < block.sensorDistance)
+      ? { distance: lidarPath, sensorDistance: lidarPath, label: lidarLabel, lateral: 0 }
+      : null;
+    let nearest = !block ? lidarBlock : !lidarBlock ? block : (lidarBlock.sensorDistance < block.sensorDistance ? lidarBlock : block);
+    if (nearest?.label === 'Pared' && !wallFrontal && !abruptTurn) nearest = null;
+    if (nearest?.label === 'Pared' && nearest.sensorDistance > 1.02 && !abruptTurn) nearest = null;
+
+    const distance = nearest ? (nearest.sensorDistance ?? nearest.distance) : Infinity;
     const speedAllowance = this.speed > 1.9 ? 0.18 : 0;
+    const wall = nearest?.label === 'Pared';
     let level = 'clear';
     if (Number.isFinite(distance)) {
-      if (distance < 0.55 + speedAllowance) level = 'critical';
-      else if (distance < 0.92 + speedAllowance) level = 'danger';
-      else if (distance < 1.30 + speedAllowance) level = 'warn';
+      if (distance < (wall ? 0.42 : 0.55) + speedAllowance) level = 'critical';
+      else if (distance < (wall ? 0.78 : 0.92) + speedAllowance) level = 'danger';
+      else if (distance < (wall ? 0.98 : 1.30) + speedAllowance) level = 'warn';
     }
     // Sin desplazamiento no hay rumbo que bloquear: solo se rompe el silencio
     // si el cuerpo está prácticamente encima de un obstáculo.
     if (!motion.moving && level !== 'critical') level = 'clear';
     this.risk = level;
 
-    const tutor = this.tutor;
-    const now = performance.now();
     const signature = `${level}|${nearest?.label || ''}|${Math.sign(nearest?.lateral || 0)}`;
     if (level === 'clear') {
       if (tutor.warned && now - tutor.lastAt > 1200 && now - tutor.lastClearAt > 9000) {
@@ -2226,9 +2282,6 @@ class App {
     const canSpeak = !this.voice.speaking || critical;
     if (!canSpeak) return;
 
-    // Solo se interrumpe si el rumbo está realmente comprometido. Si el
-    // usuario está en movimiento hacia el bloqueo, se recuerda con calma;
-    // nunca se repite el mismo aviso en cada paso.
     let shouldSpeak = false;
     if ((newScenario || changed) && now - tutor.lastAt > minGap) shouldSpeak = true;
     else if (motion.moving && !critical && now - tutor.lastAt > 15000) shouldSpeak = true;
@@ -2249,6 +2302,8 @@ class App {
       recommendation = motion.z < -0.55
         ? 'Reduce el paso y corrige el rumbo para no retroceder contra el obstáculo.'
         : 'Reduce el paso y corrige el rumbo; el paso está bloqueado.';
+    } else if (motion.moving && wall) {
+      recommendation = `Gira ligeramente a la ${turnWord} para continuar en paralelo al muro.`;
     } else if (motion.moving) {
       recommendation = `Gira ligeramente a la ${turnWord} para rodearlo.`;
     } else {
@@ -2260,6 +2315,7 @@ class App {
     tutor.lastLevel = level;
     tutor.lastSignature = signature;
     tutor.warned = true;
+    if (wall) tutor.lastWallAt = now;
     const logLevel = critical ? 'danger' : level === 'danger' ? 'warn' : 'info';
     this.speak(text, { priority: critical ? 3 : level === 'danger' ? 2 : 1, log: true, level: logLevel });
     if (this.audioEnabled && this.sonarEnabled) {
@@ -2289,12 +2345,16 @@ class App {
 
   speak(text, { priority = 1, log = true, level = 'info' } = {}) {
     if (!text) return;
-    this.lastUtterance = text;
-    this.hud.setUtterance(text, this.voiceEnabled && this.voice.speaking);
     if (log) this.hud.log(text, level);
     this.telemetry.pulse('tts', 1200);
-    if (!this.voiceEnabled) return;
-    this.voice.speak(text, { priority, force: priority >= 2 });
+    if (!this.voiceEnabled) {
+      this.lastUtterance = text;
+      this.hud.setUtterance(text, false);
+      return;
+    }
+    // La voz decide si arranca o espera en cola; el HUD se actualiza con la
+    // frase que realmente empieza a sonar (onStart).
+    this.voice.speak(text, { priority });
   }
 
   ask(kind) {
@@ -2528,15 +2588,14 @@ class App {
       }
 
       const yaw = this.xrRig.rotation.y;
-      const origin = this.tmpVec.set(
-        this.xrRig.position.x + Math.sin(yaw) * 0.18,
-        1.42,
-        this.xrRig.position.z + Math.cos(yaw) * 0.18
-      );
-      this.lidar.update(dt, origin, yaw, 1);
       this.player.yaw = yaw;
       this.rig.root.position.set(this.player.x, 0, this.player.z);
       this.rig.root.rotation.y = yaw;
+      this.rig.root.updateMatrixWorld(true);
+      // El LiDAR mide desde la cara frontal del arnés, no desde un punto
+      // genérico delante del casco.
+      const origin = this.rig.lidarAnchor.getWorldPosition(this.tmpVec);
+      this.lidar.update(dt, origin, yaw, 1);
       this.updateZone(dt);
       this.updateRisk(dt, origin);
       this.telemetry.update(dt, { fps: this.fps, scan: this.lidar.scan, speaking: this.voice.speaking, moving: true, lidarOn: this.lidarEnabled });

@@ -55,8 +55,8 @@ En la pestaña **Modelo 3D** se puede orbitar, hacer zoom y pulsar los puntos de
 ### 2. Simulación sensorial en tiempo real
 
 - Tres entornos navegables: **Casa** (vivienda adaptada con sala, cocina, pasillo y baño), **Corredor** (pasillo institucional con banco, columnas, estanterías, puertas y señalética) y **Laberinto** (calles con esquinas y pasillos estrechos). Se cambia desde el selector del dock.
-- **480 rayos LiDAR** por barrido, alcance de 12 m y visualización de pulsos, puntos de impacto y vectores de mapeo.
-- Sectores de riesgo (frente, izquierda, derecha, frente-izquierda/frente-derecha) calculados a **10 Hz** sobre el barrido.
+- **480 rayos LiDAR** por barrido, alcance de 12 m y visualización de pulsos, puntos de impacto y vectores de mapeo. El origen de medida se calibra en la cara frontal del arnés; las distancias del tutor parten del sensor, no del centro del avatar.
+- Sectores de riesgo (frente, izquierda, derecha, frente-izquierda/frente-derecha) calculados a **10 Hz** sobre el barrido. Las paredes paralelas al rumbo se tratan como límites del pasillo, no como bloqueos frontales.
 - Detección de **obstáculos bajos** (bancos, bolardos, macetas) con la cámara simulada.
 - Sensores de **IMU / SLAM** representados en el radar y en la telemetría.
 - El avatar es un humanoide estilizado de proporciones anatómicas (hombros, cintura, cadera, manos y pies), con ropa y bastón; camina, corre y gira con animación procedural y micro-movimientos de respiración y postura. El arnés va ajustado a la altura del pecho y la cámara POV hereda esos micro-movimientos con interpolación suave.
@@ -80,7 +80,7 @@ El entorno **Casa** reproduce una vivienda real con paredes, puertas, ventanas y
 - **Tutor de movilidad sin fatiga auditiva**: nada de «¡Alto!» ni un aviso por cada paso. El tutor solo considera el corredor real de marcha: un objeto junto al costado no genera alarma si la persona puede pasar sin tocarlo, y los objetos a más de 1,30 m no se anuncian como si fueran una colisión inminente. Cuando el rumbo sí está comprometido, nombra el elemento concreto —*«Al frente tienes una mesa de centro, a 48 centímetros. Reduce el paso y corrige el rumbo; el paso está bloqueado.»*— y propone un giro.
 - **Silencio inteligente**: un mismo escenario no se repite mientras el usuario avanza en una dirección segura; solo se vuelve a hablar si cambia el riesgo, si el usuario sigue acercándose tras un espacio de 7 s en riesgo crítico o 15 s en riesgo moderado, o si el camino queda despejado (un único mensaje de confirmación, con 9 s de margen). El diálogo de intenciones no interrumpe un aviso de riesgo y se pospone mientras AURA está hablando.
 - Durante un escaneo o una inspección con el objeto acercado, el tutor baja la voz y deja el protagonismo al reconocimiento de la cámara.
-- Subtítulos sincronizados en el panel **Voz local**, cola de mensajes con prioridad y repetición controlada para no saturar.
+- Subtítulos sincronizados en el panel **Voz local**. La voz no se solapa: mantiene hasta ocho frases pendientes, elimina duplicados y las ordena por prioridad (FIFO si empatan). Una frase más prioritaria puede interrumpir una locución informativa; la prioridad crítica interrumpe cualquier locución y las frases que no interrumpen esperan su turno.
 - Sonar de proximidad opcional (Web Audio) para una pista no verbal de cercanía.
 - La demo sintetiza la voz en el propio navegador (Web Speech API, es-ES) y simula el pipeline **Whisper tiny + Piper TTS (davefx)** del Raspberry Pi 5. No hay peticiones de audio a servidores.
 - Preguntas rápidas («¿Qué hay delante?», «¿Por dónde salgo?», «Describe el entorno») y micrófono si el navegador expone reconocimiento de voz.
