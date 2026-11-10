@@ -194,6 +194,9 @@
           <button data-ask="exit"><span>➜</span> ¿Por dónde salgo?</button>
           <button data-ask="describe"><span>◍</span> Describe el entorno</button>
         </div>
+        <button id="intent-open" class="intent-open" type="button" title="Abrir el plan de AURA (I)">
+          <span>◎</span> ¿Qué quieres hacer?
+        </button>
 
         <div class="section-label"><span>Registro de alertas</span><em>local</em></div>
         <ul class="log" id="voice-log" aria-live="polite">
@@ -252,7 +255,12 @@
 
     <!-- ===================== SCENE OVERLAYS ===================== -->
     <div id="vision-layer" class="vision-layer" aria-hidden="true"></div>
-    <div class="zone-label" id="zone-label"><span>ZONA</span><b>Pasillo A</b></div>
+    <div class="zone-label" id="zone-label">
+      <span>ZONA</span><b>Pasillo A</b>
+      <span id="intent-goal" class="zone-goal" hidden>
+        <i>OBJETIVO</i><b id="intent-goal-name">Cocina</b><em id="intent-goal-dist">3,4 m</em>
+      </span>
+    </div>
     <div class="scene-tip" id="scene-tip">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> desplazarse
       <span class="sep">·</span> <kbd>E</kbd> escanear
@@ -271,6 +279,23 @@
       <i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>
       <span class="scan-sweep"></span>
       <span class="scan-caption">AURA · VISIÓN POV</span>
+    </div>
+
+    <div id="intent-card" class="intent-card" role="region" aria-label="Intenciones de navegación" hidden>
+      <div class="intent-head">
+        <div>
+          <div class="intent-eyebrow">AURA · PLAN CONTIGO</div>
+          <h3 id="intent-title">¿Qué te gustaría hacer?</h3>
+        </div>
+        <button class="context-close" id="intent-close" type="button" aria-label="Cerrar intenciones">×</button>
+      </div>
+      <p class="intent-text">Elige un destino y te iré indicando el camino con referencias concretas. Puedes cambiar de idea cuando quieras.</p>
+      <div class="intent-actions" id="intent-options">
+        <button type="button" data-intent="bath"><span>◫</span><b>Ir al baño</b><em>Al fondo del pasillo</em></button>
+        <button type="button" data-intent="kitchen"><span>▤</span><b>Ir a la cocina</b><em>Barra y mesa de desayuno</em></button>
+        <button type="button" data-intent="fridge"><span>▥</span><b>Tomar algo en la nevera</b><em>Leche, jugo, fruta y queso</em></button>
+        <button type="button" data-intent="explore" class="intent-explore"><span>◌</span><b>Seguir explorando</b><em>Sin objetivo fijo</em></button>
+      </div>
     </div>
 
     <div id="context-card" class="context-card" role="region" aria-label="Interacción contextual" hidden>

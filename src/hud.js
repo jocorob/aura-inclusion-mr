@@ -78,6 +78,10 @@ export class HUD {
     this.scanSub = document.getElementById('scan-sub');
     this.scanFrame = document.getElementById('scan-frame');
     this.scanTimer = null;
+    this.intentCard = document.getElementById('intent-card');
+    this.intentGoal = document.getElementById('intent-goal');
+    this.intentGoalName = document.getElementById('intent-goal-name');
+    this.intentGoalDist = document.getElementById('intent-goal-dist');
 
     this.hotspots = [...document.querySelectorAll('.hotspot')];
     this.time = 0;
@@ -315,6 +319,32 @@ export class HUD {
     this.contextItems.innerHTML = '';
     this.contextActions.innerHTML = '';
     document.body.classList.remove('context-open');
+  }
+
+  showIntentPrompt() {
+    if (!this.intentCard) return;
+    this.hideContext();
+    this.intentCard.hidden = false;
+    document.body.classList.add('intent-open');
+  }
+
+  hideIntentPrompt() {
+    if (this.intentCard) this.intentCard.hidden = true;
+    document.body.classList.remove('intent-open');
+  }
+
+  setGoal(label, distance) {
+    if (!this.intentGoal || !this.intentGoalName || !this.intentGoalDist) return;
+    this.intentGoalName.textContent = label;
+    this.intentGoalDist.textContent = distance;
+    this.intentGoal.hidden = false;
+  }
+
+  clearGoal() {
+    if (!this.intentGoal) return;
+    this.intentGoal.hidden = true;
+    if (this.intentGoalName) this.intentGoalName.textContent = '';
+    if (this.intentGoalDist) this.intentGoalDist.textContent = '';
   }
 
   updateHotspots(rig, camera, mode, activePart) {
