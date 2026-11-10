@@ -133,6 +133,10 @@ class App {
 
     this.player = { x: -3.3, z: 2.2, yaw: 2.0 };
     this.input = { x: 0, z: 0, run: false };
+    // Flechas: orientación gradual del torso y de la cámara del arnés.
+    // No forman parte de `input` para que WASD sea la única locomoción.
+    this.turn = { yaw: 0, pitch: 0 };
+    this.lookVelocity = { yaw: 0, pitch: 0 };
     this.virtual = { forward: false, back: false, left: false, right: false, run: false };
     this.viewYaw = 2.0;
     this.viewPitch = 0;
@@ -162,7 +166,7 @@ class App {
       this.hud.setMode('sim');
       this.hud.setUtterance(this.lastUtterance, false);
       this.hud.log('Sistema iniciado · pipeline local en línea', 'info');
-      this.hud.toast('Casa AURA · WASD para caminar · E interactuar · S sentarse', 5600);
+      this.hud.toast('Casa AURA · WASD caminar · flechas orientar · E interactuar', 5600);
     }, 700);
   }
 
@@ -498,14 +502,24 @@ class App {
     }
 
     if (!this.seated) {
-      if (['ArrowUp', 'KeyW'].includes(k)) this.input.z = 1;
-      if (['ArrowDown', 'KeyS'].includes(k)) this.input.z = -1;
-      if (['ArrowLeft', 'KeyA'].includes(k)) this.input.x = -1;
-      if (['ArrowRight', 'KeyD'].includes(k)) this.input.x = 1;
-      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) {
+      if (k === 'KeyW') this.input.z = 1;
+      if (k === 'KeyS') this.input.z = -1;
+      if (k === 'KeyA') this.input.x = -1;
+      if (k === 'KeyD') this.input.x = 1;
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(k)) {
         this.cancelDemo();
       }
       if (k === 'ShiftLeft' || k === 'ShiftRight') this.input.run = true;
+    }
+    // Flechas: giro y cabeceo continuos, sin desplazar al avatar.
+    if (this.mode === 'sim' && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(k)) {
+      e.preventDefault();
+      if (k === 'ArrowLeft') this.turn.yaw = -1;
+      if (k === 'ArrowRight') this.turn.yaw = 1;
+      if (k === 'ArrowUp') this.turn.pitch = 1;
+      if (k === 'ArrowDown') this.turn.pitch = -1;
+      this.cancelDemo();
+      this.stopIntro();
     }
     if (k === 'Space') {
       e.preventDefault();
@@ -542,8 +556,12 @@ class App {
 
   onKeyUp(e) {
     const k = e.code;
-    if (['ArrowUp', 'KeyW', 'ArrowDown', 'KeyS'].includes(k)) this.input.z = 0;
-    if (['ArrowLeft', 'KeyA', 'ArrowRight', 'KeyD'].includes(k)) this.input.x = 0;
+    if (['KeyW', 'KeyS'].includes(k)) this.input.z = 0;
+    if (['KeyA', 'KeyD'].includes(k)) this.input.x = 0;
+    if (k === 'ArrowLeft') this.turn.yaw = 0;
+    if (k === 'ArrowRight') this.turn.yaw = 0;
+    if (k === 'ArrowUp') this.turn.pitch = 0;
+    if (k === 'ArrowDown') this.turn.pitch = 0;
     if (k === 'ShiftLeft' || k === 'ShiftRight') this.input.run = false;
   }
 
@@ -1825,7 +1843,34 @@ class App {
     return { x, z, run };
   }
 
+  updateLookOrientation(dt) {
+    if (this.mode !== 'sim') {
+      this.lookVelocity.yaw = 0;
+      this.lookVelocity.pitch = 0;
+      return;
+    }
+    const active = !this.scan && (this.turn.yaw !== 0 || this.turn.pitch !== 0);
+    const runBoost = this.input.run ? 1.28 : 1;
+    const targetYaw = active ? this.turn.yaw * 1.45 * runBoost : 0;
+    const targetPitch = active ? this.turn.pitch * 0.92 * runBoost : 0;
+    const alpha = 1 - Math.exp(-10 * dt);
+    this.lookVelocity.yaw = lerp(this.lookVelocity.yaw, targetYaw, alpha);
+    this.lookVelocity.pitch = lerp(this.lookVelocity.pitch, targetPitch, alpha);
+    if (Math.abs(this.lookVelocity.yaw) > 0.0005) {
+      this.viewYaw = wrapAngle(this.viewYaw + this.lookVelocity.yaw * dt);
+    }
+    if (Math.abs(this.lookVelocity.pitch) > 0.0005) {
+      if (this.camMode === 'pov') {
+        this.viewPitch = clamp(this.viewPitch + this.lookVelocity.pitch * dt, -1.02, 0.56);
+      } else {
+        // En tercera persona, mirar arriba baja la cámara orbital y viceversa.
+        this.thirdPitch = clamp(this.thirdPitch - this.lookVelocity.pitch * dt, -0.06, 0.78);
+      }
+    }
+  }
+
   updatePlayer(dt) {
+    this.updateLookOrientation(dt);
     if (this.seated) {
       this.speed = damp(this.speed, 0, 8, dt);
       this.rig.root.position.set(this.player.x, 0, this.player.z);
@@ -1857,8 +1902,12 @@ class App {
       this.speed = damp(this.speed, 0, 7, dt);
     }
 
+    // El torso acompaña a la cámara también cuando la persona gira con las
+    // flechas sin desplazarse. En POV se mantiene la respuesta algo más viva.
     if (this.camMode === 'pov') {
       this.player.yaw = dampAngle(this.player.yaw, this.viewYaw, 18, dt);
+    } else if (!moving) {
+      this.player.yaw = dampAngle(this.player.yaw, this.viewYaw, 7, dt);
     }
 
     resolveCircleAABB(this.player, 0.32, this.env.colliders);
@@ -2064,6 +2113,59 @@ class App {
     return `A tu ${sideWord} tienes ${list}${extra}${distance}.`;
   }
 
+  movementHeading() {
+    const { x, z } = this.getMoveInput();
+    const magnitude = Math.hypot(x, z);
+    if (magnitude < 0.06) return { heading: this.viewYaw, moving: false, x: 0, z: 0 };
+    const nx = x / magnitude;
+    const nz = z / magnitude;
+    const yaw = this.viewYaw;
+    const dirX = Math.sin(yaw) * nz - Math.cos(yaw) * nx;
+    const dirZ = Math.cos(yaw) * nz + Math.sin(yaw) * nx;
+    return { heading: Math.atan2(dirX, dirZ), moving: true, x: nx, z: nz };
+  }
+
+  /**
+   * Comprueba si el corredor que ocupa el cuerpo (radio + margen) está
+   * bloqueado en el rumbo real de marcha. Un objeto junto al costado no
+   * cuenta si la persona puede pasar sin tocarlo.
+   */
+  pathBlockAt(heading, halfWidth = 0.41, maxDistance = 1.6) {
+    const fx = Math.sin(heading);
+    const fz = Math.cos(heading);
+    const rx = Math.cos(heading);
+    const rz = -Math.sin(heading);
+    let best = null;
+    for (const collider of this.env.colliders || []) {
+      const cx = (collider.minX + collider.maxX) * 0.5;
+      const cz = (collider.minZ + collider.maxZ) * 0.5;
+      const hx = Math.max(0.01, (collider.maxX - collider.minX) * 0.5);
+      const hz = Math.max(0.01, (collider.maxZ - collider.minZ) * 0.5);
+      const dx = cx - this.player.x;
+      const dz = cz - this.player.z;
+      const forward = dx * fx + dz * fz;
+      const lateral = dx * rx + dz * rz;
+      const halfForward = Math.abs(fx) * hx + Math.abs(fz) * hz;
+      const halfLateral = Math.abs(rx) * hx + Math.abs(rz) * hz;
+      if (forward + halfForward < 0.04) continue;
+      if (Math.abs(lateral) > halfWidth + halfLateral) continue;
+      const distance = Math.max(0.04, forward - halfForward);
+      if (distance > maxDistance) continue;
+      if (!best || distance < best.distance) {
+        best = { distance, label: collider.label || 'Pared', lateral, low: Boolean(collider.low) };
+      }
+    }
+    return best;
+  }
+
+  pathDirectionPhrase(motion) {
+    if (!motion.moving || motion.z > 0.55) return 'Al frente';
+    if (motion.z < -0.55) return 'Detrás de ti';
+    if (motion.x > 0.55) return 'A tu derecha';
+    if (motion.x < -0.55) return 'A tu izquierda';
+    return motion.x > 0 ? 'En diagonal a tu derecha' : 'En diagonal a tu izquierda';
+  }
+
   updateRisk(dt, sensor) {
     this.riskTimer += dt;
     if (this.riskTimer < 0.18) return;
@@ -2078,73 +2180,32 @@ class App {
     if (this.intentPromptOpen) return;
 
     const scan = this.lidar.scan;
-    const now = performance.now();
-    const fwdX = Math.sin(this.player.yaw);
-    const fwdZ = Math.cos(this.player.yaw);
-    const origin = new THREE.Vector3(this.player.x, 0.55, this.player.z);
-    const box = new THREE.Box3();
-    const center = new THREE.Vector3();
-    const hazards = new Map();
-    const addHazard = (side, d, label, low = false) => {
-      if (!isFinite(d) || d > 2.4) return;
-      const prev = hazards.get(side);
-      if (!prev || d < prev.d) hazards.set(side, { side, d, label: label || 'Obstáculo', low });
-    };
+    const motion = this.movementHeading();
+    const block = this.pathBlockAt(motion.heading);
+    // El LiDAR solo se usa como refuerzo del corredor: sus rayos viajan a
+    // 1,42 m y no ven mesas bajas, pero sí paredes y muebles altos.
+    const lidarPath = Number.isFinite(scan.path) ? scan.path : Infinity;
+    const lidarBlock = lidarPath < 1.35 && (!block || lidarPath < block.distance)
+      ? { distance: lidarPath, label: scan.pathHit?.label || 'Pared', lateral: 0 }
+      : null;
+    const nearest = !block ? lidarBlock : !lidarBlock ? block : (lidarBlock.distance < block.distance ? lidarBlock : block);
+    const distance = nearest ? nearest.distance : Infinity;
 
-    // Obstáculos bajos: la cámara de profundidad los localiza y el ángulo
-    // relativo permite agruparlos por lado sin disparar un aviso por paso.
-    const lowBySide = {};
-    const lowGroups = { front: [], left: [], right: [] };
-    for (const obs of this.env.obstacles) {
-      if (!obs.low) continue;
-      box.setFromObject(obs.mesh);
-      if (box.isEmpty()) continue;
-      box.getCenter(center);
-      const dx = center.x - this.player.x;
-      const dz = center.z - this.player.z;
-      const len = Math.hypot(dx, dz) || 1;
-      if ((dx * fwdX + dz * fwdZ) / len < 0.2) continue;
-      const d = Math.max(0.05, box.distanceToPoint(origin));
-      if (d > 2.4) continue;
-      const rel = wrapAngle(Math.atan2(dx, dz) - this.player.yaw);
-      const side = Math.abs(rel) <= 0.55 ? 'front'
-        : rel > 0.55 && rel <= 1.45 ? 'right'
-          : rel < -0.55 && rel >= -1.45 ? 'left' : null;
-      if (!side) continue;
-      const entry = { d, label: obs.label, rel };
-      lowGroups[side].push(entry);
-      if (!lowBySide[side] || d < lowBySide[side].d) lowBySide[side] = entry;
-    }
-
-    if (lowBySide.front) addHazard('front', lowBySide.front.d, lowBySide.front.label, true);
-    if (isFinite(scan.front) && scan.front < 2.35) {
-      const prev = hazards.get('front');
-      if (!prev || scan.front < prev.d - 0.04) addHazard('front', scan.front, scan.frontHit?.label || 'Pared');
-    }
-    if (lowBySide.left) addHazard('left', lowBySide.left.d, lowBySide.left.label, true);
-    if (isFinite(scan.left) && scan.left < 0.72) {
-      const prev = hazards.get('left');
-      if (!prev || scan.left < prev.d - 0.04) addHazard('left', scan.left, scan.leftHit?.label || 'Pared');
-    }
-    if (lowBySide.right) addHazard('right', lowBySide.right.d, lowBySide.right.label, true);
-    if (isFinite(scan.right) && scan.right < 0.72) {
-      const prev = hazards.get('right');
-      if (!prev || scan.right < prev.d - 0.04) addHazard('right', scan.right, scan.rightHit?.label || 'Pared');
-    }
-
-    const frontD = hazards.get('front')?.d ?? Infinity;
-    const nearestD = hazards.size ? Math.min(...[...hazards.values()].map((h) => h.d)) : Infinity;
+    const speedAllowance = this.speed > 1.9 ? 0.18 : 0;
     let level = 'clear';
-    if (frontD < 0.8 || nearestD < 0.55) level = 'critical';
-    else if (frontD < 1.45 || nearestD < 0.8) level = 'danger';
-    else if (frontD < 2.35 || nearestD < 1.3) level = 'warn';
+    if (Number.isFinite(distance)) {
+      if (distance < 0.55 + speedAllowance) level = 'critical';
+      else if (distance < 0.92 + speedAllowance) level = 'danger';
+      else if (distance < 1.30 + speedAllowance) level = 'warn';
+    }
+    // Sin desplazamiento no hay rumbo que bloquear: solo se rompe el silencio
+    // si el cuerpo está prácticamente encima de un obstáculo.
+    if (!motion.moving && level !== 'critical') level = 'clear';
     this.risk = level;
 
-    const sides = ['front', 'left', 'right'].filter((side) => hazards.has(side));
-    const signature = `${level}|${sides.map((side) => hazards.get(side)?.label || '').join('|')}`;
     const tutor = this.tutor;
-    const critical = level === 'critical';
-
+    const now = performance.now();
+    const signature = `${level}|${nearest?.label || ''}|${Math.sign(nearest?.lateral || 0)}`;
     if (level === 'clear') {
       if (tutor.warned && now - tutor.lastAt > 1200 && now - tutor.lastClearAt > 9000) {
         tutor.warned = false;
@@ -2157,77 +2218,52 @@ class App {
       return;
     }
 
-    const leftBlocked = hazards.has('left');
-    const rightBlocked = hazards.has('right');
-    const leftOpen = Math.min(scan.frontLeft, scan.left);
-    const rightOpen = Math.min(scan.frontRight, scan.right);
-    let turn = rightOpen >= leftOpen ? 'right' : 'left';
-    if (leftBlocked && !rightBlocked) turn = 'right';
-    if (rightBlocked && !leftBlocked) turn = 'left';
-    const turnWord = turn === 'right' ? 'derecha' : 'izquierda';
-
-    // Describimos los elementos concretos que hay a cada lado; nunca una
-    // frase genérica sin nombres ni referencias espaciales concretas.
-    const obstacleSentence = sides
-      .map((side) => this.riskSideSentence(side, hazards, lowGroups))
-      .filter(Boolean)
-      .join(' ');
-
-    let recommendation = '';
-    const sideOnly = !isFinite(frontD) && sides.length > 0;
-    if (frontD < 0.8) {
-      recommendation = leftBlocked && rightBlocked
-        ? 'Detente un momento y da un paso atrás; hay poco espacio a los lados.'
-        : `Detente un momento y da un paso atrás. Después gira ligeramente a la ${turnWord}.`;
-    } else if (sideOnly) {
-      recommendation = leftBlocked && rightBlocked
-        ? 'Reduce el paso y retrocede un poco para dejar espacio.'
-        : `Desplázate un poco a la ${turnWord} para dejar espacio.`;
-    } else if (leftBlocked && rightBlocked) {
-      recommendation = 'Reduce el paso; hay poco espacio a ambos lados.';
-    } else {
-      recommendation = `Gira ligeramente a la ${turnWord} para seguir avanzando.`;
-    }
-
-    let text = `${obstacleSentence} ${recommendation}`.trim();
-    if (critical) text = `Vamos con calma. ${text}`;
-
-    const input = this.input;
-    let movingToward = false;
-    let movingAway = false;
-    for (const side of sides) {
-      if (side === 'front') {
-        if (input.z > 0.1) movingToward = true;
-        else if (input.z < -0.1) movingAway = true;
-      } else if (side === 'left') {
-        if (input.x < -0.1) movingToward = true;
-        else if (input.x > 0.1) movingAway = true;
-      } else if (side === 'right') {
-        if (input.x > 0.1) movingToward = true;
-        else if (input.x < -0.1) movingAway = true;
-      }
-    }
-
+    if (!nearest) return;
+    const critical = level === 'critical';
     const changed = level !== tutor.lastLevel;
     const newScenario = signature !== tutor.lastSignature;
-    const minGap = critical ? 2400 : changed ? 2600 : 5200;
+    const minGap = critical ? 3600 : changed ? 5200 : 7600;
     const canSpeak = !this.voice.speaking || critical;
     if (!canSpeak) return;
-    if (movingAway && !movingToward && !changed) return;
 
+    // Solo se interrumpe si el rumbo está realmente comprometido. Si el
+    // usuario está en movimiento hacia el bloqueo, se recuerda con calma;
+    // nunca se repite el mismo aviso en cada paso.
     let shouldSpeak = false;
     if ((newScenario || changed) && now - tutor.lastAt > minGap) shouldSpeak = true;
-    else if (movingToward && now - tutor.lastAt > (critical ? 7000 : 15000)) shouldSpeak = true;
+    else if (motion.moving && !critical && now - tutor.lastAt > 15000) shouldSpeak = true;
+    else if (motion.moving && critical && now - tutor.lastAt > 7000) shouldSpeak = true;
     if (!shouldSpeak) return;
+
+    const lateralLeft = this.pathBlockAt(motion.heading - 0.62, 0.41, 1.35);
+    const lateralRight = this.pathBlockAt(motion.heading + 0.62, 0.41, 1.35);
+    let turn = 'right';
+    if (nearest.lateral > 0.06) turn = 'left';
+    else if (nearest.lateral < -0.06) turn = 'right';
+    else turn = (lateralLeft?.distance ?? Infinity) >= (lateralRight?.distance ?? Infinity) ? 'left' : 'right';
+    const turnWord = turn === 'right' ? 'derecha' : 'izquierda';
+    const prefix = this.pathDirectionPhrase(motion);
+    const obstacle = this.presentObstacle(nearest.label);
+    let recommendation;
+    if (critical) {
+      recommendation = motion.z < -0.55
+        ? 'Reduce el paso y corrige el rumbo para no retroceder contra el obstáculo.'
+        : 'Reduce el paso y corrige el rumbo; el paso está bloqueado.';
+    } else if (motion.moving) {
+      recommendation = `Gira ligeramente a la ${turnWord} para rodearlo.`;
+    } else {
+      recommendation = 'Puedes mantener la posición y elegir otro rumbo antes de avanzar.';
+    }
+    const text = `${prefix} tienes ${obstacle}, a ${fmtDist(distance)}. ${recommendation}`;
 
     tutor.lastAt = now;
     tutor.lastLevel = level;
     tutor.lastSignature = signature;
     tutor.warned = true;
-    const logLevel = level === 'critical' ? 'danger' : level === 'danger' ? 'warn' : 'info';
+    const logLevel = critical ? 'danger' : level === 'danger' ? 'warn' : 'info';
     this.speak(text, { priority: critical ? 3 : level === 'danger' ? 2 : 1, log: true, level: logLevel });
     if (this.audioEnabled && this.sonarEnabled) {
-      this.sonar.ping(isFinite(frontD) ? frontD : nearestD, Math.sin(hazards.get('front')?.rel || 0));
+      this.sonar.ping(distance, 0);
     }
     if (critical && this.sonarEnabled && this.audioEnabled && navigator.vibrate) navigator.vibrate([30, 50, 30]);
 
@@ -2235,7 +2271,7 @@ class App {
     this.sonarTimer += dt;
     if (this.audioEnabled && this.sonarEnabled && this.speed > 0.15 && (level === 'critical' || level === 'danger') && this.sonarTimer > 1.4) {
       this.sonarTimer = 0;
-      this.sonar.ping(isFinite(frontD) ? frontD : nearestD, Math.sin(hazards.get('front')?.rel || 0));
+      this.sonar.ping(distance, 0);
     }
   }
 
