@@ -17,6 +17,11 @@ export class VoiceSystem {
     this.lastSpoken = '';
     this.lastSpokenAt = 0;
     this.fallbackTimer = null;
+    // Cola de frases: una sola locución activa y el resto espera turno.
+    this.queue = [];
+    this.current = null;
+    this.token = 0;
+    this.queueOrder = 0;
 
     if (this.supported) {
       this.loadVoices();
@@ -64,71 +69,137 @@ export class VoiceSystem {
         /* ignore */
       }
     }
-    if (this.fallbackTimer) clearTimeout(this.fallbackTimer);
+    this.token += 1;
+    this._clearFallback();
+    this.queue.length = 0;
+    this.current = null;
+    this.currentPriority = 0;
     this.speaking = false;
     this.onEnd();
   }
 
-  /**
-   * @param {string} text
-   * @param {{priority?: number, force?: boolean, onDone?: Function}} options
-   */
-  speak(text, { priority = 1, force = false } = {}) {
-    if (!text || !this.enabled) return false;
-    if (!force && this.speaking && priority < this.currentPriority) return false;
-    if (!force && this.speaking && priority === this.currentPriority) return false;
+  _clearFallback() {
+    if (this.fallbackTimer) {
+      clearTimeout(this.fallbackTimer);
+      this.fallbackTimer = null;
+    }
+  }
 
-    this.currentPriority = priority;
-    this.lastSpoken = text;
+  _enqueue(item) {
+    if (this.current && item.text === this.current.text) return true;
+    if (this.queue.some((queued) => queued.text === item.text)) return true;
+    item.order = ++this.queueOrder;
+    this.queue.push(item);
+    // La cola nunca crece sin límite: primero se descarta lo prescindible.
+    if (this.queue.length > 8) {
+      let drop = this.queue.findIndex((queued) => queued.priority < 3);
+      if (drop < 0) drop = 0;
+      this.queue.splice(drop, 1);
+    }
+    return true;
+  }
+
+  _start(item) {
+    this._clearFallback();
+    const token = ++this.token;
+    this.current = item;
+    this.currentPriority = item.priority;
+    this.lastSpoken = item.text;
     this.lastSpokenAt = performance.now();
     this.speaking = true;
-    this.onStart(text);
+    this.onStart(item.text);
 
     if (!this.synth) {
-      this.fallbackTimer = setTimeout(() => {
-        this.speaking = false;
-        this.onEnd();
-      }, Math.max(1400, text.length * 62));
+      this.fallbackTimer = setTimeout(() => this._finish(token), Math.max(1400, item.text.length * 62));
       return true;
     }
 
     try {
+      // El navegador solo reproduce una locución: se cancela la anterior para
+      // que la nueva empiece limpia y sin solaparse.
       this.synth.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
+      const utter = new SpeechSynthesisUtterance(item.text);
       if (this.voice) utter.voice = this.voice;
       utter.lang = this.voice?.lang || 'es-ES';
       utter.rate = 1.04;
       utter.pitch = 1;
       utter.volume = 1;
       utter.onstart = () => {
-        this.speaking = true;
-        this.onStart(text);
+        if (token === this.token) this.speaking = true;
       };
-      utter.onend = () => {
-        this.speaking = false;
-        this.onEnd();
-      };
+      utter.onend = () => this._finish(token);
       utter.onerror = (event) => {
-        this.speaking = false;
+        if (token !== this.token) return;
         this.onError(event);
-        this.onEnd();
+        this._finish(token);
       };
       this.synth.speak(utter);
-      // Respaldo por si el navegador no dispara onend
-      clearTimeout(this.fallbackTimer);
-      this.fallbackTimer = setTimeout(() => {
-        if (this.speaking) {
-          this.speaking = false;
-          this.onEnd();
-        }
-      }, Math.max(2600, text.length * 75));
+      // Respaldo por si el navegador no dispara onend.
+      this.fallbackTimer = setTimeout(
+        () => this._finish(token),
+        Math.max(2600, item.text.length * 75),
+      );
       return true;
     } catch {
-      this.speaking = false;
-      this.onEnd();
+      if (token === this.token) this._finish(token);
       return false;
     }
   }
+
+  _finish(token) {
+    if (token !== this.token || !this.current) return;
+    const item = this.current;
+    this._clearFallback();
+    this.current = null;
+    this.currentPriority = 0;
+    this.speaking = false;
+    this.onEnd();
+    try {
+      item.onDone?.();
+    } catch {
+      /* ignore */
+    }
+    this._drain();
+  }
+
+  _drain() {
+    if (this.speaking || this.current || !this.queue.length) return;
+    this.queue.sort((a, b) => b.priority - a.priority || a.order - b.order);
+    this._start(this.queue.shift());
+  }
+
+  /**
+   * @param {string} text
+   * @param {{priority?: number, onDone?: Function}} options
+   */
+  speak(text, { priority = 1, onDone } = {}) {
+    if (!text || !this.enabled) return false;
+    const item = { text, priority, onDone, order: 0 };
+
+    if (this.speaking) {
+      // Lo crítico manda de inmediato. Un aviso de prioridad 2 puede cortar
+      // una frase informativa, pero nunca otra frase de escaneo o un crítico.
+      const canInterrupt = priority >= 3
+        || (priority > this.currentPriority && this.currentPriority < 2);
+      if (!canInterrupt) return this._enqueue(item);
+
+      this.token += 1;
+      this._clearFallback();
+      try {
+        this.synth?.cancel();
+      } catch {
+        /* ignore */
+      }
+      this.current = null;
+      this.currentPriority = 0;
+      this.speaking = false;
+      this.onEnd();
+      return this._start(item);
+    }
+
+    return this._start(item);
+  }
+
 }
 
 /** Pulsos sonoros de proximidad (sonar), generados con WebAudio. */

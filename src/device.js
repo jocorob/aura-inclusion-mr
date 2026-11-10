@@ -918,7 +918,9 @@ export function createAuraRig() {
 
   /* ----- Anclas ----- */
   const lidarAnchor = new THREE.Object3D();
-  lidarAnchor.position.set(0, 0.156, 0.002);
+  // Origen del LiDAR en la cara frontal del módulo, por delante del pecho.
+  // Evita distancias medidas desde el centro interno del avatar.
+  lidarAnchor.position.set(0, 0.156, 0.052);
   device.add(lidarAnchor);
 
   const cameraAnchor = new THREE.Object3D();
